@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title><%= title %> · <%= portalName %></title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%8C%82%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/styles.css">
+<script src="/assets/admin.js" defer></script>
+</head>
+<body>
+<% if (locals.user) { %>
+<nav class="topbar">
+  <a class="brand" href="/"><span class="brand-mark">⌂</span><%= portalName %></a>
+  <div class="topbar-right">
+    <% if (user.is_admin && !user.is_blocked) { %>
+      <a class="nav-link<%= (locals.currentPath || '').startsWith('/admin/users') ? ' active' : '' %>" href="/admin/users">Users</a>
+      <a class="nav-link<%= (locals.currentPath || '').startsWith('/admin/services') ? ' active' : '' %>" href="/admin/services">Services</a>
+    <% } %>
+    <span class="whoami">
+      <% if (user.picture) { %><img class="avatar" src="<%= user.picture %>" alt="" referrerpolicy="no-referrer"><% } %>
+      <span class="whoami-name"><%= user.name || user.email %></span>
+    </span>
+    <form method="post" action="/logout" class="inline-form">
+      <input type="hidden" name="_csrf" value="<%= locals.csrfToken || '' %>">
+      <button class="btn btn-ghost btn-sm" type="submit">Sign out</button>
+    </form>
+  </div>
+</nav>
+<% } %>
+<main class="container">

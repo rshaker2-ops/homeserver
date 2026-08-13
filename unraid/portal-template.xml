@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>homeserver-portal</Name>
+  <Repository>ghcr.io/rshaker2-ops/homeserver-portal:latest</Repository>
+  <Registry>https://github.com/rshaker2-ops/homeserver/pkgs/container/homeserver-portal</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/rshaker2-ops/homeserver/issues</Support>
+  <Project>https://github.com/rshaker2-ops/homeserver</Project>
+  <Overview>Google-authenticated portal for lordblight.com. Users sign in with a Google account and see tiles for only the services they have been granted (Immich, Nextcloud, 2FAuth, and anything added later). Includes an admin UI for per-user grants and a forward-auth endpoint so Nginx Proxy Manager can enforce access at the proxy. Full setup guide: https://github.com/rshaker2-ops/homeserver#readme</Overview>
+  <Category>Tools: Security: Network:Web</Category>
+  <WebUI>http://[IP]:[PORT:8899]/</WebUI>
+  <Icon>https://raw.githubusercontent.com/rshaker2-ops/homeserver/main/unraid/portal-icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/rshaker2-ops/homeserver/main/unraid/portal-template.xml</TemplateURL>
+  <Config Name="Web Port" Target="8899" Default="8899" Mode="tcp" Description="Host port for the portal. NPM proxies www.lordblight.com to this port." Type="Port" Display="always" Required="true" Mask="false">8899</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/cache/appdata/portal" Mode="rw" Description="SQLite data directory. Keep it on the cache pool (/mnt/cache/...), NOT /mnt/user/... (FUSE breaks SQLite locking). One-time setup: chown -R 1000:1000 /mnt/cache/appdata/portal" Type="Path" Display="always" Required="true" Mask="false">/mnt/cache/appdata/portal</Config>
+  <Config Name="BASE_URL" Target="BASE_URL" Default="https://www.lordblight.com" Mode="" Description="Public URL of the portal." Type="Variable" Display="always" Required="true" Mask="false">https://www.lordblight.com</Config>
+  <Config Name="GOOGLE_CLIENT_ID" Target="GOOGLE_CLIENT_ID" Default="" Mode="" Description="Google OAuth client ID (README step 1)." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="GOOGLE_CLIENT_SECRET" Target="GOOGLE_CLIENT_SECRET" Default="" Mode="" Description="Google OAuth client secret." Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="SESSION_SECRET" Target="SESSION_SECRET" Default="" Mode="" Description="At least 32 random characters. Generate with: openssl rand -hex 32" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="ADMIN_EMAILS" Target="ADMIN_EMAILS" Default="" Mode="" Description="Comma-separated Google account emails that get administrator access." Type="Variable" Display="always" Required="true" Mask="false"></Config>
+  <Config Name="COOKIE_DOMAIN" Target="COOKIE_DOMAIN" Default="lordblight.com" Mode="" Description="Parent cookie domain, required for NPM forward-auth across the service subdomains." Type="Variable" Display="always" Required="false" Mask="false">lordblight.com</Config>
+  <Config Name="ALLOWED_EMAILS" Target="ALLOWED_EMAILS" Default="" Mode="" Description="Optional: comma-separated emails that may sign in at all (admins always may). Empty = anyone can sign in but sees nothing until granted." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="ALLOWED_EMAIL_DOMAINS" Target="ALLOWED_EMAIL_DOMAINS" Default="" Mode="" Description="Optional: comma-separated email domains that may sign in." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="PORTAL_NAME" Target="PORTAL_NAME" Default="lordblight.com" Mode="" Description="Name shown in the header and page titles." Type="Variable" Display="advanced" Required="false" Mask="false">lordblight.com</Config>
+  <Config Name="SESSION_MAX_AGE_DAYS" Target="SESSION_MAX_AGE_DAYS" Default="7" Mode="" Description="How long a sign-in lasts before users must sign in again." Type="Variable" Display="advanced" Required="false" Mask="false">7</Config>
+</Container>

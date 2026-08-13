@@ -1,0 +1,33 @@
+<%- include('partials/header') %>
+<header class="page-head">
+  <h1>Your services</h1>
+  <p class="muted">Signed in as <%= user.email %><%= user.is_admin ? ' · administrator' : '' %></p>
+</header>
+
+<% if (user.is_blocked) { %>
+  <div class="empty-state">
+    <div class="empty-icon">⛔</div>
+    <h2>Access disabled</h2>
+    <p class="muted">Your account has been disabled. Contact the administrator.</p>
+  </div>
+<% } else if (services.length === 0) { %>
+  <div class="empty-state">
+    <div class="empty-icon">⏳</div>
+    <h2>No services yet</h2>
+    <p class="muted">You're signed in, but the administrator hasn't granted you access to any services yet.</p>
+  </div>
+<% } else { %>
+  <div class="grid">
+    <% for (const s of services) { %>
+      <a class="card" href="<%= s.url %>" target="_blank" rel="noopener">
+        <div class="card-icon"><% if (/^https?:\/\//.test(s.icon)) { %><img src="<%= s.icon %>" alt=""><% } else { %><span><%= s.icon %></span><% } %></div>
+        <div class="card-body">
+          <h3><%= s.name %></h3>
+          <p><%= s.description %></p>
+        </div>
+        <span class="card-cta">Open ↗</span>
+      </a>
+    <% } %>
+  </div>
+<% } %>
+<%- include('partials/footer') %>

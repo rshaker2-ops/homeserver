@@ -1,0 +1,59 @@
+<%- include('../partials/header') %>
+<header class="page-head">
+  <h1><%= heading %></h1>
+</header>
+
+<% if (errors.length) { %>
+  <div class="alert">
+    <ul class="plain-list">
+      <% for (const e of errors) { %><li><%= e %></li><% } %>
+    </ul>
+  </div>
+<% } %>
+
+<section class="panel">
+  <form method="post" action="<%= action %>" class="form-grid">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+    <label class="field">
+      <span>Name</span>
+      <input name="name" value="<%= service.name %>" maxlength="100" required placeholder="Uptime Kuma">
+    </label>
+
+    <label class="field">
+      <span>Slug <span class="muted small">(used as /api/authz/&lt;slug&gt; — lowercase, no spaces)</span></span>
+      <input name="slug" value="<%= service.slug %>" maxlength="64" required pattern="[a-z0-9][a-z0-9_-]*" placeholder="uptime">
+    </label>
+
+    <label class="field">
+      <span>URL</span>
+      <input name="url" type="url" value="<%= service.url %>" required placeholder="https://uptime.lordblight.com">
+    </label>
+
+    <label class="field">
+      <span>Description</span>
+      <input name="description" value="<%= service.description %>" maxlength="300" placeholder="Service status monitoring">
+    </label>
+
+    <label class="field">
+      <span>Icon <span class="muted small">(an emoji, or an https image URL)</span></span>
+      <input name="icon" value="<%= service.icon %>" maxlength="300" placeholder="📈">
+    </label>
+
+    <label class="field">
+      <span>Sort order <span class="muted small">(lower shows first)</span></span>
+      <input name="sort_order" type="number" value="<%= service.sort_order %>" step="1">
+    </label>
+
+    <label class="check">
+      <input type="checkbox" name="enabled" <%= service.enabled ? 'checked' : '' %>>
+      Enabled — untick to hide this service from everyone and deny it at the proxy
+    </label>
+
+    <div class="row-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <a class="btn btn-ghost" href="/admin/services">Cancel</a>
+    </div>
+  </form>
+</section>
+<%- include('../partials/footer') %>
