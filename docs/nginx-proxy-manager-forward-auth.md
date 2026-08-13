@@ -58,9 +58,9 @@ location / {
 }
 ```
 
-> ⚠️ **Lockout warning:** if the 2FA codes for your *Google account* live in 2FAuth, a broken portal could lock you out of both. Escape hatch: 2FAuth stays reachable on the LAN at `http://192.168.89.106:8805` (unless you also enable its header-auth mode — see below).
+> ⚠️ **Lockout warning:** if the 2FA codes for your *Google account* live in 2FAuth, a broken portal could lock you out of both. Escape hatch: 2FAuth stays reachable on the LAN at `http://192.168.89.106:8805` (unless you also enable its header-auth mode — see [in-app-sso.md](in-app-sso.md)).
 
-Bonus: with this gate in place, 2FAuth can consume the forwarded identity for automatic sign-in (no second login) — see [in-app-sso.md](in-app-sso.md). The same doc covers FileBrowser (`files.lordblight.com`), which uses this exact full-gate snippet with the slug swapped to `files`.
+Bonus: with this gate in place, 2FAuth can consume the forwarded identity for automatic sign-in (no second login) — see [in-app-sso.md](in-app-sso.md) for setup steps and limitations.
 
 ## Immich (`im.lordblight.com`) — gate the web UI, keep the mobile app working
 
@@ -160,6 +160,8 @@ Also keep `client_max_body_size 0;` at the top of the Advanced config for large 
 4. Grant it on **Admin → Users** to whoever should see it.
 
 > Gate the NPM admin UI only **after** the portal has proven itself — if the portal breaks, you'd otherwise be fixing NPM through its LAN address `http://192.168.89.106:81` (which is the escape hatch, and why LAN access should stay unforwarded but open).
+
+**Other services:** FileBrowser (`files.lordblight.com` → `http://192.168.89.106:8890`) uses this exact full-gate snippet with slug `files` and is already deployed. With the gate live, it can authenticate users via the portal's `Remote-User` header — see [in-app-sso.md](in-app-sso.md) for setup and header-based sign-in details.
 
 ## Verify it's actually enforcing
 
