@@ -35,6 +35,7 @@ flowchart LR
 | `portal/.env.example` | Configuration template |
 | `docker-compose.yml` | Runs the portal on port **8899** |
 | `docs/nginx-proxy-manager-forward-auth.md` | Per-service NPM snippets + troubleshooting |
+| `docs/in-app-sso.md` | Same Google account *inside* the apps (FileBrowser/2FAuth header auth, Immich/Nextcloud OIDC) |
 | `unraid/portal-template.xml` | Unraid Docker template (Docker tab → Add Container) |
 | `.github/workflows/portal.yml` | CI: tests on PRs, publishes `ghcr.io/rshaker2-ops/homeserver-portal` on `main` |
 
@@ -178,4 +179,4 @@ npm test               # 24 tests, no Google account needed
 - Default-deny: a fresh Google sign-in has zero access until granted; unknown services and disabled services also deny.
 - Authorization is checked **live** on every request the proxy forwards — revocations and blocks are instant, and blocking also destroys the user's sessions.
 - Sessions: HttpOnly, Secure, SameSite=Lax cookies signed with `SESSION_SECRET`; OAuth uses `state` + PKCE and requires a verified email; login rotates the session ID; forms are CSRF-protected; `rd` redirects only allow `*.lordblight.com`.
-- **Limits to know about:** enforcement happens at NPM's vhosts, so LAN clients can still hit `192.168.89.106:<port>` directly — that's your escape hatch if the portal is ever down, and it's fine as long as only ports 80/443 are forwarded from the internet. This portal is perimeter auth + launchpad, not SSO *into* the apps: people still use each app's own account. (Future nicety with zero portal changes: enable the apps' native OIDC login against Google so the same account works inside Immich/Nextcloud. If needs ever outgrow this — groups, MFA policies, real SSO — [Authentik](https://goauthentik.io/) is the graduation path.)
+- **Limits to know about:** enforcement happens at NPM's vhosts, so LAN clients can still hit `192.168.89.106:<port>` directly — that's your escape hatch if the portal is ever down, and it's fine as long as only ports 80/443 are forwarded from the internet. Out of the box this portal is perimeter auth + launchpad, not SSO *into* the apps — but [docs/in-app-sso.md](docs/in-app-sso.md) closes that gap: FileBrowser and 2FAuth consume the portal's identity headers for automatic sign-in, and Immich/Nextcloud log in with the same Google account via their native OIDC support. (If needs ever outgrow this — groups, MFA policies — [Authentik](https://goauthentik.io/) is the graduation path.)
