@@ -40,6 +40,9 @@ function loadConfig(env = process.env) {
 
   const cookieDomain = (env.COOKIE_DOMAIN || '').trim().replace(/^\./, '').toLowerCase() || null;
 
+  const smtpPort = Number(env.SMTP_PORT) || 587;
+  const smtpUser = (env.SMTP_USER || '').trim() || null;
+
   return {
     baseUrl,
     baseHost,
@@ -56,6 +59,14 @@ function loadConfig(env = process.env) {
     sessionMaxAgeDays: Number(env.SESSION_MAX_AGE_DAYS) || 7,
     secureCookies: baseUrl.startsWith('https://'),
     testLogin: env.PORTAL_TEST_LOGIN === '1' && isTest,
+    inviteExpiryDays: Number(env.INVITE_EXPIRY_DAYS) || 14,
+    smtpHost: (env.SMTP_HOST || '').trim() || null,
+    smtpPort,
+    // Explicit SMTP_SECURE wins; otherwise implicit TLS on 465, STARTTLS elsewhere.
+    smtpSecure: env.SMTP_SECURE != null ? env.SMTP_SECURE === 'true' : smtpPort === 465,
+    smtpUser,
+    smtpPass: env.SMTP_PASS || null,
+    mailFrom: (env.MAIL_FROM || '').trim() || smtpUser,
   };
 }
 

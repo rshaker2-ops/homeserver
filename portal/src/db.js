@@ -48,6 +48,25 @@ const MIGRATIONS = [
   CREATE INDEX idx_sessions_expires ON sessions (expires);
   CREATE INDEX idx_sessions_user ON sessions (user_id);
   `,
+  `
+  CREATE TABLE invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    invited_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL,
+    accepted_at TEXT,
+    accepted_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE UNIQUE INDEX idx_invites_pending_email ON invites (email) WHERE accepted_at IS NULL;
+
+  CREATE TABLE invite_services (
+    invite_id INTEGER NOT NULL REFERENCES invites(id) ON DELETE CASCADE,
+    service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+    PRIMARY KEY (invite_id, service_id)
+  );
+  `,
 ];
 
 const DEFAULT_SERVICES = [

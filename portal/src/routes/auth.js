@@ -2,18 +2,29 @@
 
 const crypto = require('node:crypto');
 const express = require('express');
-const { safeRedirectTarget, isEmailAllowed, asyncHandler } = require('../util');
+const { safeRedirectTarget, isEmailAllowlisted, asyncHandler } = require('../util');
 
 const LOGIN_ERRORS = {
   state: 'Your sign-in attempt expired — please try again.',
   google: 'Google sign-in failed — please try again.',
   unverified: 'Your Google account email address is not verified.',
-  notallowed: 'This Google account is not allowed to sign in here.',
+  notinvited:
+    'This portal is invitation-only. Ask the administrator to send an invitation to your Google account email.',
   blocked: 'Your access has been disabled by the administrator.',
 };
 
 function authRoutes({ config, queries, google }) {
   const router = express.Router();
+
+  // Registration is invitation-only. Sign-in proceeds when the Google account
+  // already has a portal account, is allowlisted (admins always are), or has a
+  // pending invitation — which gets consumed on this first sign-in.
+  function signInGate({ sub, email }) {
+    if (queries.getUserBySub(sub)) return { allowed: true, invite: null };
+    if (isEmailAllowlisted(email, config)) return { allowed: true, invite: null };
+    const invite = queries.getPendingInviteByEmail(email);
+    return invite ? { allowed: true, invite } : { allowed: false, invite: null };
+  }
 
   router.get('/login', (req, res) => {
     if (req.user) return res.redirect(safeRedirectTarget(req.query.rd, config));
@@ -22,6 +33,24 @@ function authRoutes({ config, queries, google }) {
       rd: typeof req.query.rd === 'string' ? req.query.rd : '',
       error: LOGIN_ERRORS[req.query.error] || null,
       signedOut: req.query.signedout === '1',
+    });
+  });
+
+  // Landing page for emailed invitation links. The link itself grants nothing —
+  // the sign-in gate matches on the invited email — so an expired or replaced
+  // token only affects this page, never an existing account.
+  router.get('/invite/:token', (req, res) => {
+    if (req.user) return res.redirect('/');
+    const invite = queries.getInviteByToken(String(req.params.token));
+    const state = !invite || invite.accepted_at
+      ? 'invalid'
+      : queries.getPendingInviteByEmail(invite.email)?.id === invite.id
+        ? 'valid'
+        : 'expired';
+    res.status(state === 'valid' ? 200 : 410).render('invite', {
+      title: 'Invitation',
+      state,
+      email: state === 'valid' ? invite.email : null,
     });
   });
 
@@ -58,12 +87,15 @@ function authRoutes({ config, queries, google }) {
 
       const email = (profile.email || '').toLowerCase();
       if (!email || profile.email_verified !== true) return res.redirect('/login?error=unverified');
-      if (!isEmailAllowed(email, config)) return res.redirect('/login?error=notallowed');
+
+      const gate = signInGate({ sub: profile.sub, email });
+      if (!gate.allowed) return res.redirect('/login?error=notinvited');
 
       const user = queries.upsertGoogleUser(
         { sub: profile.sub, email, name: profile.name, picture: profile.picture },
         config.adminEmails.includes(email)
       );
+      if (gate.invite) queries.acceptInvite(gate.invite.id, user.id);
       if (user.is_blocked) return res.redirect('/login?error=blocked');
 
       const rd = saved.rd || '/';
@@ -90,15 +122,19 @@ function authRoutes({ config, queries, google }) {
 
   // Test-only login used by the automated tests so Google isn't needed.
   // Registered exclusively when NODE_ENV=test AND PORTAL_TEST_LOGIN=1.
+  // Goes through the same signInGate as the real callback.
   if (config.testLogin) {
     router.post('/test/login', (req, res, next) => {
       const email = String((req.body && req.body.email) || '').toLowerCase();
       if (!email) return res.status(400).send('email required');
-      if (!isEmailAllowed(email, config)) return res.status(403).send('not allowed');
+      const sub = `test:${email}`;
+      const gate = signInGate({ sub, email });
+      if (!gate.allowed) return res.status(403).send('not invited');
       const user = queries.upsertGoogleUser(
-        { sub: `test:${email}`, email, name: req.body.name || email, picture: null },
+        { sub, email, name: req.body.name || email, picture: null },
         config.adminEmails.includes(email)
       );
+      if (gate.invite) queries.acceptInvite(gate.invite.id, user.id);
       const rd = safeRedirectTarget(req.body.rd, config);
       req.session.regenerate((err) => {
         if (err) return next(err);

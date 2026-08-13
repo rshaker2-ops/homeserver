@@ -46,6 +46,34 @@ function createQueries(db) {
     ),
 
     deleteSessionsForUser: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
+
+    insertInvite: db.prepare(
+      `INSERT INTO invites (email, token, invited_by, expires_at)
+       VALUES (?, ?, ?, datetime('now', ?))`
+    ),
+    deletePendingInviteByEmail: db.prepare('DELETE FROM invites WHERE email = ? AND accepted_at IS NULL'),
+    inviteById: db.prepare('SELECT * FROM invites WHERE id = ?'),
+    inviteByToken: db.prepare('SELECT * FROM invites WHERE token = ?'),
+    pendingInviteByEmail: db.prepare(
+      `SELECT * FROM invites
+       WHERE email = ? AND accepted_at IS NULL AND expires_at > datetime('now')`
+    ),
+    listPendingInvites: db.prepare(
+      `SELECT *, (expires_at <= datetime('now')) AS expired FROM invites
+       WHERE accepted_at IS NULL ORDER BY created_at DESC, id DESC`
+    ),
+    refreshInvite: db.prepare(
+      `UPDATE invites SET token = ?, expires_at = datetime('now', ?) WHERE id = ?`
+    ),
+    markInviteAccepted: db.prepare(
+      `UPDATE invites SET accepted_at = datetime('now'), accepted_user_id = ? WHERE id = ?`
+    ),
+    deleteInvite: db.prepare('DELETE FROM invites WHERE id = ? AND accepted_at IS NULL'),
+    addInviteService: db.prepare(
+      'INSERT OR IGNORE INTO invite_services (invite_id, service_id) VALUES (?, ?)'
+    ),
+    allInviteServices: db.prepare('SELECT invite_id, service_id FROM invite_services'),
+    inviteServiceIds: db.prepare('SELECT service_id FROM invite_services WHERE invite_id = ?'),
   };
 
   // Users are keyed by the immutable Google `sub`; email/name/picture refresh
@@ -97,8 +125,34 @@ function createQueries(db) {
     return map;
   }
 
+  // Re-inviting an email replaces its pending invite (fresh token and expiry),
+  // so a mistyped grant list or a stale link can always be corrected.
+  const createInvite = db.transaction(({ email, token, invitedBy, expiryDays, serviceIds }) => {
+    stmts.deletePendingInviteByEmail.run(email);
+    const info = stmts.insertInvite.run(email, token, invitedBy || null, `+${expiryDays} days`);
+    for (const serviceId of serviceIds) stmts.addInviteService.run(info.lastInsertRowid, serviceId);
+    return stmts.inviteById.get(info.lastInsertRowid);
+  });
+
+  // Called on the invited user's first sign-in: consumes the invite and turns
+  // its pre-selected services into real grants.
+  const acceptInvite = db.transaction((inviteId, userId) => {
+    stmts.markInviteAccepted.run(userId, inviteId);
+    for (const row of stmts.inviteServiceIds.all(inviteId)) stmts.addGrant.run(userId, row.service_id);
+  });
+
+  function inviteServicesByInvite() {
+    const map = new Map();
+    for (const row of stmts.allInviteServices.all()) {
+      if (!map.has(row.invite_id)) map.set(row.invite_id, new Set());
+      map.get(row.invite_id).add(row.service_id);
+    }
+    return map;
+  }
+
   return {
     getUserById: (id) => stmts.userById.get(id),
+    getUserBySub: (sub) => stmts.userBySub.get(sub),
     getUserByEmail: (email) => stmts.userByEmail.get(email),
     listUsers: () => stmts.listUsers.all(),
     upsertGoogleUser,
@@ -117,6 +171,15 @@ function createQueries(db) {
     grantsByUser,
     grantCountByService,
     deleteSessionsForUser: (userId) => stmts.deleteSessionsForUser.run(userId),
+    createInvite,
+    acceptInvite,
+    getInviteById: (id) => stmts.inviteById.get(id),
+    getInviteByToken: (token) => stmts.inviteByToken.get(token),
+    getPendingInviteByEmail: (email) => stmts.pendingInviteByEmail.get(email),
+    listPendingInvites: () => stmts.listPendingInvites.all(),
+    refreshInvite: (id, token, expiryDays) => stmts.refreshInvite.run(token, `+${expiryDays} days`, id),
+    deleteInvite: (id) => stmts.deleteInvite.run(id),
+    inviteServicesByInvite,
   };
 }
 

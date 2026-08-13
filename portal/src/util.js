@@ -27,9 +27,11 @@ function headerSafe(value) {
   return String(value ?? '').replace(/[^\x20-\x7E]/g, '').slice(0, 200);
 }
 
-function isEmailAllowed(email, config) {
+// Emails that may sign in WITHOUT an invitation: admins (so the portal can
+// always be bootstrapped) plus the optional ALLOWED_* lists. Everyone else
+// needs a pending invite — registration is invitation-only.
+function isEmailAllowlisted(email, config) {
   const { adminEmails, allowedEmails, allowedEmailDomains } = config;
-  if (!allowedEmails.length && !allowedEmailDomains.length) return true;
   if (adminEmails.includes(email)) return true;
   if (allowedEmails.includes(email)) return true;
   const domain = email.split('@')[1] || '';
@@ -38,4 +40,4 @@ function isEmailAllowed(email, config) {
 
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-module.exports = { safeRedirectTarget, headerSafe, isEmailAllowed, asyncHandler };
+module.exports = { safeRedirectTarget, headerSafe, isEmailAllowlisted, asyncHandler };
