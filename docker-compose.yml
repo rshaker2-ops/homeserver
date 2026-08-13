@@ -1,0 +1,22 @@
+services:
+  portal:
+    # Prebuilt image published by GitHub Actions from this repo.
+    # To build locally instead: docker compose up -d --build
+    image: ghcr.io/rshaker2-ops/homeserver-portal:latest
+    build: ./portal
+    container_name: homeserver-portal
+    restart: unless-stopped
+    ports:
+      - "8899:8899"
+    env_file:
+      - ./portal/.env
+    volumes:
+      - portal_data:/data
+      # On Unraid, prefer a bind mount on the cache pool instead (SQLite over
+      # /mnt/user FUSE shares has locking problems). One-time setup:
+      #   mkdir -p /mnt/cache/appdata/portal && chown -R 1000:1000 /mnt/cache/appdata/portal
+      # then replace the volume above with:
+      # - /mnt/cache/appdata/portal:/data
+
+volumes:
+  portal_data:

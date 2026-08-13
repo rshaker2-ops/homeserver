@@ -1,0 +1,48 @@
+name: portal
+
+on:
+  push:
+    branches: [main]
+    paths: ['portal/**', '.github/workflows/portal.yml']
+  pull_request:
+    paths: ['portal/**', '.github/workflows/portal.yml']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: portal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: portal/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  publish:
+    # Publishes ghcr.io/rshaker2-ops/homeserver-portal:latest for Unraid to pull.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: portal
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/homeserver-portal:latest
+            ghcr.io/${{ github.repository_owner }}/homeserver-portal:${{ github.sha }}

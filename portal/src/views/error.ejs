@@ -1,0 +1,8 @@
+<%- include('partials/header') %>
+<div class="empty-state">
+  <div class="empty-icon"><%= status === 404 ? '🧭' : '⚠️' %></div>
+  <h2><%= status %> — <%= title %></h2>
+  <p class="muted"><%= message %></p>
+  <p><a class="btn btn-primary" href="/">Back to the portal</a></p>
+</div>
+<%- include('partials/footer') %>

@@ -1,0 +1,36 @@
+<%- include('../partials/header') %>
+<header class="page-head row-between">
+  <div>
+    <h1>Services</h1>
+    <p class="muted">These are the tiles users can be granted. Add anything with a URL — new services need no code changes.</p>
+  </div>
+  <a class="btn btn-primary" href="/admin/services/new">＋ Add service</a>
+</header>
+
+<% if (saved) { %><div class="notice">Saved.</div><% } %>
+
+<% for (const s of services) { %>
+  <section class="panel service-row">
+    <div class="card-icon"><% if (/^https?:\/\//.test(s.icon)) { %><img src="<%= s.icon %>" alt=""><% } else { %><span><%= s.icon %></span><% } %></div>
+    <div class="service-info">
+      <div class="user-name"><%= s.name %> <% if (!s.enabled) { %><span class="chip chip-blocked">disabled</span><% } %></div>
+      <div class="muted small"><a href="<%= s.url %>" target="_blank" rel="noopener"><%= s.url %></a></div>
+      <div class="muted small">slug <span class="mono"><%= s.slug %></span> · forward-auth <span class="mono">/api/authz/<%= s.slug %></span> · granted to <%= counts.get(s.id) || 0 %> user<%= (counts.get(s.id) || 0) === 1 ? '' : 's' %></div>
+    </div>
+    <div class="row-actions">
+      <a class="btn btn-sm" href="/admin/services/<%= s.id %>/edit">Edit</a>
+      <form method="post" action="/admin/services/<%= s.id %>/delete" data-confirm="Delete this service? Its grants will be removed and its forward-auth endpoint will start denying everyone.">
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+        <button class="btn btn-danger btn-sm" type="submit">Delete</button>
+      </form>
+    </div>
+  </section>
+<% } %>
+
+<div class="tip">
+  <strong>Adding a new service?</strong> After creating it here: 1) add a DNS record and an NPM proxy host for it,
+  2) grant it to users on the <a href="/admin/users">Users</a> page, and 3) optionally paste the forward-auth snippet
+  into the NPM host's Advanced tab (see <span class="mono">docs/nginx-proxy-manager-forward-auth.md</span>) so the
+  grant is enforced at the proxy.
+</div>
+<%- include('../partials/footer') %>

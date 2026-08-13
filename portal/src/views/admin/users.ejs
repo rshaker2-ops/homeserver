@@ -1,0 +1,73 @@
+<%- include('../partials/header') %>
+<header class="page-head">
+  <h1>Users</h1>
+  <p class="muted">People appear here after their first Google sign-in. Grant services below — changes apply immediately, even to open sessions.</p>
+</header>
+
+<% if (saved) { %><div class="notice">Saved.</div><% } %>
+<% if (error) { %><div class="alert"><%= error %></div><% } %>
+
+<% if (users.length === 0) { %>
+  <div class="empty-state">
+    <div class="empty-icon">👋</div>
+    <h2>No users yet</h2>
+    <p class="muted">Nobody has signed in yet. Share <span class="mono">/login</span> with your users.</p>
+  </div>
+<% } %>
+
+<% for (const u of users) { %>
+  <% const g = grants.get(u.id) || new Set(); const isSelf = u.id === user.id; %>
+  <section class="panel">
+    <form method="post" action="/admin/users/<%= u.id %>">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <div class="user-head">
+        <% if (u.picture) { %>
+          <img class="avatar avatar-lg" src="<%= u.picture %>" alt="" referrerpolicy="no-referrer">
+        <% } else { %>
+          <div class="avatar avatar-lg avatar-fallback"><%= (u.name || u.email).slice(0, 1).toUpperCase() %></div>
+        <% } %>
+        <div class="user-id">
+          <div class="user-name">
+            <%= u.name || u.email %>
+            <% if (isSelf) { %><span class="chip">you</span><% } %>
+            <% if (u.is_admin) { %><span class="chip chip-admin">admin</span><% } %>
+            <% if (u.is_blocked) { %><span class="chip chip-blocked">blocked</span><% } %>
+            <% if (!u.is_admin && !u.is_blocked && g.size === 0) { %><span class="chip chip-pending">pending</span><% } %>
+          </div>
+          <div class="muted small"><%= u.email %> · first sign-in <%= (u.created_at || '').slice(0, 10) %> · last sign-in <%= (u.last_login_at || '—').slice(0, 16) %></div>
+        </div>
+      </div>
+
+      <div class="toggle-row">
+        <label class="check"><input type="checkbox" name="is_admin" <%= u.is_admin ? 'checked' : '' %> <%= isSelf ? 'disabled' : '' %>> Administrator</label>
+        <label class="check"><input type="checkbox" name="is_blocked" <%= u.is_blocked ? 'checked' : '' %> <%= isSelf ? 'disabled' : '' %>> Blocked</label>
+      </div>
+
+      <fieldset class="grant-set">
+        <legend>Service access<%= u.is_admin ? ' — admins can open every service' : '' %></legend>
+        <div class="grant-grid">
+          <% for (const s of services) { %>
+            <label class="check"><input type="checkbox" name="services" value="<%= s.id %>" <%= g.has(s.id) ? 'checked' : '' %>> <%= s.name %><%= s.enabled ? '' : ' (disabled)' %></label>
+          <% } %>
+        </div>
+      </fieldset>
+
+      <div class="row-actions">
+        <button class="btn btn-primary" type="submit">Save</button>
+      </div>
+    </form>
+    <% if (!isSelf) { %>
+      <div class="row-actions row-actions-danger">
+        <form method="post" action="/admin/users/<%= u.id %>/signout">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button class="btn btn-ghost btn-sm" type="submit">Sign out everywhere</button>
+        </form>
+        <form method="post" action="/admin/users/<%= u.id %>/delete" data-confirm="Remove this user? They can sign in again later but will lose all access grants.">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button class="btn btn-danger btn-sm" type="submit">Remove</button>
+        </form>
+      </div>
+    <% } %>
+  </section>
+<% } %>
+<%- include('../partials/footer') %>

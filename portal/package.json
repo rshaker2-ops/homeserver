@@ -1,0 +1,25 @@
+{
+  "name": "homeserver-portal",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Google-authenticated portal for home server services with admin-managed per-user access",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch --env-file=.env src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20.6"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "ejs": "^3.1.10",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "google-auth-library": "^9.15.1"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.1"
+  }
+}
