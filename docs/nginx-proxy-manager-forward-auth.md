@@ -58,7 +58,9 @@ location / {
 }
 ```
 
-> ⚠️ **Lockout warning:** if the 2FA codes for your *Google account* live in 2FAuth, a broken portal could lock you out of both. Escape hatch: 2FAuth stays reachable on the LAN at `http://192.168.89.106:8805`.
+> ⚠️ **Lockout warning:** if the 2FA codes for your *Google account* live in 2FAuth, a broken portal could lock you out of both. Escape hatch: 2FAuth stays reachable on the LAN at `http://192.168.89.106:8805` (unless you also enable its header-auth mode — see below).
+
+Bonus: with this gate in place, 2FAuth can consume the forwarded identity for automatic sign-in (no second login) — see [in-app-sso.md](in-app-sso.md). The same doc covers FileBrowser (`files.lordblight.com`), which uses this exact full-gate snippet with the slug swapped to `files`.
 
 ## Immich (`im.lordblight.com`) — gate the web UI, keep the mobile app working
 
