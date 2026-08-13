@@ -8,6 +8,7 @@ const { openDb } = require('./db');
 const { createQueries } = require('./queries');
 const { SqliteSessionStore } = require('./session-store');
 const { createGoogleAuth } = require('./google');
+const { createMailer } = require('./mailer');
 const { securityHeaders, attachUser, csrfProtection } = require('./middleware');
 const { authRoutes } = require('./routes/auth');
 const { portalRoutes } = require('./routes/portal');
@@ -18,6 +19,7 @@ function createApp(config) {
   const db = openDb(config.dataDir);
   const queries = createQueries(db);
   const google = createGoogleAuth(config);
+  const mailer = createMailer(config);
 
   const app = express();
   app.set('view engine', 'ejs');
@@ -59,7 +61,7 @@ function createApp(config) {
   app.use(authRoutes({ config, queries, google }));
   app.use(authzRoutes({ queries }));
   app.use(portalRoutes({ queries }));
-  app.use(adminRoutes({ queries }));
+  app.use(adminRoutes({ queries, config, mailer }));
 
   app.use((req, res) => {
     res.status(404).render('error', { title: 'Not found', status: 404, message: "That page doesn't exist." });

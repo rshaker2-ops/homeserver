@@ -1,17 +1,78 @@
 <%- include('../partials/header') %>
 <header class="page-head">
   <h1>Users</h1>
-  <p class="muted">People appear here after their first Google sign-in. Grant services below — changes apply immediately, even to open sessions.</p>
+  <p class="muted">Sign-in is invitation-only: invite someone below, then grant or adjust their services once they appear. Changes apply immediately, even to open sessions.</p>
 </header>
 
 <% if (saved) { %><div class="notice">Saved.</div><% } %>
+<% if (invited === 'sent') { %><div class="notice">Invitation created and emailed.</div><% } %>
+<% if (invited === 'link') { %><div class="notice">Invitation created — email isn't configured, so copy the invite link below and send it to them.</div><% } %>
+<% if (invited === 'failed') { %><div class="alert">Invitation created, but the email could not be sent — copy the invite link below and send it yourself.</div><% } %>
 <% if (error) { %><div class="alert"><%= error %></div><% } %>
+
+<section class="panel">
+  <h2 class="panel-title">Invite someone</h2>
+  <p class="muted small">Only invited Google accounts can sign in and create an account. Pick the services they should start with — you can change grants any time after they join.</p>
+  <form method="post" action="/admin/invites" class="form-grid">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label class="field">
+      <span>Google account email</span>
+      <input name="email" type="email" required maxlength="200" placeholder="family-member@gmail.com">
+    </label>
+    <fieldset class="grant-set">
+      <legend>Start with access to</legend>
+      <div class="grant-grid">
+        <% for (const s of services) { %>
+          <label class="check"><input type="checkbox" name="services" value="<%= s.id %>"> <%= s.name %><%= s.enabled ? '' : ' (disabled)' %></label>
+        <% } %>
+      </div>
+    </fieldset>
+    <div class="row-actions">
+      <button class="btn btn-primary" type="submit"><%= mailEnabled ? 'Send invitation' : 'Create invitation' %></button>
+      <% if (!mailEnabled) { %><span class="muted small">SMTP not configured — you'll get a link to copy.</span><% } %>
+    </div>
+  </form>
+</section>
+
+<% if (invites.length > 0) { %>
+  <section class="panel">
+    <h2 class="panel-title">Pending invitations</h2>
+    <% for (const i of invites) { %>
+      <% const preGrants = inviteServices.get(i.id) || new Set(); %>
+      <div class="invite-row">
+        <div class="invite-info">
+          <div class="user-name">
+            <%= i.email %>
+            <% if (i.expired) { %><span class="chip chip-blocked">expired</span><% } %>
+          </div>
+          <div class="muted small">
+            invited <%= (i.created_at || '').slice(0, 10) %> ·
+            <%= i.expired ? 'expired' : 'expires' %> <%= (i.expires_at || '').slice(0, 10) %>
+            <% const names = services.filter((s) => preGrants.has(s.id)).map((s) => s.name); %>
+            <% if (names.length) { %> · starts with <%= names.join(', ') %><% } %>
+          </div>
+          <input class="invite-link mono" value="<%= baseUrl %>/invite/<%= i.token %>" readonly data-copy title="Click to copy">
+        </div>
+        <div class="row-actions">
+          <form method="post" action="/admin/invites/<%= i.id %>/resend" class="inline-form">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button class="btn btn-ghost btn-sm" type="submit"><%= mailEnabled ? 'Resend' : 'New link' %></button>
+          </form>
+          <form method="post" action="/admin/invites/<%= i.id %>/delete" class="inline-form">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button class="btn btn-danger btn-sm" type="submit">Revoke</button>
+          </form>
+        </div>
+      </div>
+    <% } %>
+  </section>
+<% } %>
 
 <% if (users.length === 0) { %>
   <div class="empty-state">
     <div class="empty-icon">👋</div>
     <h2>No users yet</h2>
-    <p class="muted">Nobody has signed in yet. Share <span class="mono">/login</span> with your users.</p>
+    <p class="muted">Nobody has an account yet. Send an invitation above — people appear here after their first sign-in.</p>
   </div>
 <% } %>
 

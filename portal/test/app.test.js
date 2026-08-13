@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -36,6 +37,18 @@ function formBody(fields) {
     for (const v of [].concat(value)) params.append(key, v);
   }
   return params.toString();
+}
+
+// Registration is invitation-only, so tests invite non-admin emails before
+// their first sign-in (subsequent sign-ins find the existing account).
+function invite(queries, email, serviceIds = []) {
+  return queries.createInvite({
+    email,
+    token: crypto.randomBytes(12).toString('base64url'),
+    invitedBy: 'test-admin',
+    expiryDays: 14,
+    serviceIds,
+  });
 }
 
 async function loginAgent(app, email) {
@@ -110,6 +123,7 @@ test('unknown service slug fails closed', async () => {
 
 test('new user is pending; admin grant flow works end to end', async () => {
   const { app, queries } = makeApp();
+  invite(queries, FRIEND);
   const friendAgent = await loginAgent(app, FRIEND);
 
   const dash = await friendAgent.get('/').expect(200);
@@ -140,6 +154,7 @@ test('new user is pending; admin grant flow works end to end', async () => {
 
 test('revoking a grant bites existing sessions immediately', async () => {
   const { app, queries } = makeApp();
+  invite(queries, FRIEND);
   const friendAgent = await loginAgent(app, FRIEND);
   const friend = queries.getUserByEmail(FRIEND);
   const immich = queries.getServiceBySlug('immich');
@@ -153,6 +168,7 @@ test('revoking a grant bites existing sessions immediately', async () => {
 
 test('blocking bites existing sessions immediately (live lookup)', async () => {
   const { app, queries } = makeApp();
+  invite(queries, FRIEND);
   const friendAgent = await loginAgent(app, FRIEND);
   const friend = queries.getUserByEmail(FRIEND);
   queries.setUserServices(friend.id, [queries.getServiceBySlug('immich').id]);
@@ -166,6 +182,7 @@ test('blocking bites existing sessions immediately (live lookup)', async () => {
 
 test('blocking via the admin UI also destroys the target sessions', async () => {
   const { app, queries } = makeApp();
+  invite(queries, FRIEND);
   const friendAgent = await loginAgent(app, FRIEND);
   const adminAgent = await loginAgent(app, ADMIN);
   const token = await csrfFrom(adminAgent, '/admin/users');
@@ -183,6 +200,7 @@ test('blocking via the admin UI also destroys the target sessions', async () => 
 
 test('admin "sign out everywhere" kills the user session', async () => {
   const { app, queries } = makeApp();
+  invite(queries, FRIEND);
   const friendAgent = await loginAgent(app, FRIEND);
   const adminAgent = await loginAgent(app, ADMIN);
   const token = await csrfFrom(adminAgent, '/admin/users');
@@ -198,6 +216,7 @@ test('admin "sign out everywhere" kills the user session', async () => {
 
 test('deleting a user removes them and their sessions; self-delete is refused', async () => {
   const { app, queries } = makeApp();
+  invite(queries, FRIEND);
   const friendAgent = await loginAgent(app, FRIEND);
   const adminAgent = await loginAgent(app, ADMIN);
   const token = await csrfFrom(adminAgent, '/admin/users');
@@ -239,11 +258,21 @@ test('admins cannot demote or block themselves', async () => {
   assert.equal(after.is_blocked, 0);
 });
 
-test('non-admins cannot open admin pages', async () => {
-  const { app } = makeApp();
+test('non-admins cannot open admin pages or create invites', async () => {
+  const { app, queries } = makeApp();
+  invite(queries, FRIEND);
   const friendAgent = await loginAgent(app, FRIEND);
   await friendAgent.get('/admin/users').expect(403);
   await friendAgent.get('/admin/services').expect(403);
+
+  // With a valid CSRF token, so it's the admin check that rejects.
+  const token = await csrfFrom(friendAgent, '/');
+  await friendAgent
+    .post('/admin/invites')
+    .type('form')
+    .send(formBody({ _csrf: token, email: 'someone@example.com' }))
+    .expect(403);
+  assert.equal(queries.listPendingInvites().length, 0);
 });
 
 test('CSRF: POSTs without a valid token are rejected', async () => {
@@ -305,6 +334,7 @@ test('service CRUD via the admin UI, including validation and fail-closed disabl
     .type('form')
     .send(formBody({ _csrf: token, name: 'Hidden', slug: 'hidden', url: 'https://h.lordblight.com' }))
     .expect(302); // no enabled=on -> disabled
+  invite(queries, FRIEND);
   const friendAgent = await loginAgent(app, FRIEND);
   const friend = queries.getUserByEmail(FRIEND);
   const hidden = queries.getServiceBySlug('hidden');
@@ -322,7 +352,8 @@ test('service CRUD via the admin UI, including validation and fail-closed disabl
 });
 
 test('rd redirect validation: same-site targets allowed, everything else falls back to /', async () => {
-  const { app } = makeApp({ BASE_URL: 'https://www.lordblight.com', COOKIE_DOMAIN: 'lordblight.com' });
+  const { app, queries } = makeApp({ BASE_URL: 'https://www.lordblight.com', COOKIE_DOMAIN: 'lordblight.com' });
+  invite(queries, FRIEND); // consumed on the first login; later logins find the account
   const cases = [
     ['https://im.lordblight.com/photos', 'https://im.lordblight.com/photos'],
     ['https://lordblight.com/', 'https://lordblight.com/'],
@@ -383,7 +414,7 @@ test('users are keyed by Google sub: email change updates the same account', asy
   assert.equal(queries.getUserByEmail('old@example.com'), undefined);
 });
 
-test('sign-in allowlist blocks unlisted accounts when configured', async () => {
+test('allowlisted emails and admins may sign in without an invitation', async () => {
   const { app } = makeApp({
     ALLOWED_EMAILS: 'vip@example.com',
     ALLOWED_EMAIL_DOMAINS: 'family.example',
@@ -398,8 +429,134 @@ test('sign-in allowlist blocks unlisted accounts when configured', async () => {
     .expect(403);
 });
 
+test('uninvited sign-in is rejected and creates no user or session', async () => {
+  const { app, db, queries } = makeApp();
+  await request(app)
+    .post('/test/login')
+    .type('form')
+    .send(formBody({ email: 'stranger@example.com' }))
+    .expect(403);
+  assert.equal(queries.getUserByEmail('stranger@example.com'), undefined);
+  assert.equal(sessionCount(db), 0);
+});
+
+test('invitation flow end to end: invite via UI, sign in, pre-grants applied, invite consumed', async () => {
+  const { app, queries } = makeApp();
+  const adminAgent = await loginAgent(app, ADMIN);
+  const token = await csrfFrom(adminAgent, '/admin/users');
+  const immich = queries.getServiceBySlug('immich');
+
+  await adminAgent
+    .post('/admin/invites')
+    .type('form')
+    .send(formBody({ _csrf: token, email: FRIEND.toUpperCase(), services: String(immich.id) }))
+    .expect(302);
+
+  // Pending list shows the invite (email lowercased) and its link.
+  const pending = queries.listPendingInvites();
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].email, FRIEND);
+  const page = await adminAgent.get('/admin/users').expect(200);
+  assert.match(page.text, new RegExp(`/invite/${pending[0].token}`));
+
+  // The invited user signs in and starts with exactly the pre-granted service.
+  const friendAgent = await loginAgent(app, FRIEND);
+  await friendAgent.get('/api/authz/immich').expect(200);
+  await friendAgent.get('/api/authz/nextcloud').expect(403);
+
+  // Invite is consumed; signing in again finds the existing account.
+  assert.equal(queries.listPendingInvites().length, 0);
+  await loginAgent(app, FRIEND);
+});
+
+test('expired or revoked invitations do not allow sign-in', async () => {
+  const { app, db, queries } = makeApp();
+
+  const expired = invite(queries, 'late@example.com');
+  db.prepare(`UPDATE invites SET expires_at = datetime('now', '-1 hour') WHERE id = ?`).run(expired.id);
+  await request(app)
+    .post('/test/login')
+    .type('form')
+    .send(formBody({ email: 'late@example.com' }))
+    .expect(403);
+
+  const revoked = invite(queries, 'gone@example.com');
+  queries.deleteInvite(revoked.id);
+  await request(app)
+    .post('/test/login')
+    .type('form')
+    .send(formBody({ email: 'gone@example.com' }))
+    .expect(403);
+});
+
+test('invite landing page: valid shows the email, unknown and expired do not sign anyone in', async () => {
+  const { app, db, queries } = makeApp();
+  const inv = invite(queries, FRIEND);
+
+  const ok = await request(app).get(`/invite/${inv.token}`).expect(200);
+  assert.match(ok.text, new RegExp(FRIEND));
+  assert.match(ok.text, /Sign in with Google/);
+
+  await request(app).get('/invite/not-a-real-token').expect(410);
+
+  db.prepare(`UPDATE invites SET expires_at = datetime('now', '-1 hour') WHERE id = ?`).run(inv.id);
+  const expired = await request(app).get(`/invite/${inv.token}`).expect(410);
+  assert.match(expired.text, /expired/);
+});
+
+test('re-inviting an email replaces the pending invite and invalidates the old link', async () => {
+  const { app, queries } = makeApp();
+  const first = invite(queries, FRIEND);
+  invite(queries, FRIEND);
+
+  const pending = queries.listPendingInvites();
+  assert.equal(pending.length, 1);
+  assert.notEqual(pending[0].token, first.token);
+  await request(app).get(`/invite/${first.token}`).expect(410);
+  await request(app).get(`/invite/${pending[0].token}`).expect(200);
+});
+
+test('inviting an existing user or an invalid address is refused', async () => {
+  const { app, queries } = makeApp();
+  invite(queries, FRIEND);
+  await loginAgent(app, FRIEND);
+
+  const adminAgent = await loginAgent(app, ADMIN);
+  const token = await csrfFrom(adminAgent, '/admin/users');
+
+  const dup = await adminAgent
+    .post('/admin/invites')
+    .type('form')
+    .send(formBody({ _csrf: token, email: FRIEND }))
+    .expect(302);
+  assert.match(dup.headers.location, /error=/);
+
+  const bad = await adminAgent
+    .post('/admin/invites')
+    .type('form')
+    .send(formBody({ _csrf: token, email: 'not-an-email' }))
+    .expect(302);
+  assert.match(bad.headers.location, /error=/);
+  assert.equal(queries.listPendingInvites().length, 0);
+});
+
+test('admin can revoke a pending invitation from the UI', async () => {
+  const { app, queries } = makeApp();
+  const inv = invite(queries, 'newcomer@example.com');
+  const adminAgent = await loginAgent(app, ADMIN);
+  const token = await csrfFrom(adminAgent, '/admin/users');
+
+  await adminAgent
+    .post(`/admin/invites/${inv.id}/delete`)
+    .type('form')
+    .send(formBody({ _csrf: token }))
+    .expect(302);
+  assert.equal(queries.listPendingInvites().length, 0);
+});
+
 test('denied page names the service', async () => {
-  const { app } = makeApp();
+  const { app, queries } = makeApp();
+  invite(queries, FRIEND);
   const friendAgent = await loginAgent(app, FRIEND);
   const res = await friendAgent.get('/denied?service=nextcloud').expect(403);
   assert.match(res.text, /Nextcloud/);

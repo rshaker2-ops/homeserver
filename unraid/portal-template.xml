@@ -8,7 +8,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/rshaker2-ops/homeserver/issues</Support>
   <Project>https://github.com/rshaker2-ops/homeserver</Project>
-  <Overview>Google-authenticated portal for lordblight.com. Users sign in with a Google account and see tiles for only the services they have been granted (Immich, Nextcloud, 2FAuth, and anything added later). Includes an admin UI for per-user grants and a forward-auth endpoint so Nginx Proxy Manager can enforce access at the proxy. Full setup guide: https://github.com/rshaker2-ops/homeserver#readme</Overview>
+  <Overview>Google-authenticated, invitation-only portal for lordblight.com. You invite each person by email from the admin UI; invited users sign in with their Google account and see tiles for only the services they have been granted (Immich, Nextcloud, 2FAuth, and anything added later). Includes per-user grants and a forward-auth endpoint so Nginx Proxy Manager can enforce access at the proxy. Full setup guide: https://github.com/rshaker2-ops/homeserver#readme</Overview>
   <Category>Tools: Security: Network:Web</Category>
   <WebUI>http://[IP]:[PORT:8899]/</WebUI>
   <Icon>https://raw.githubusercontent.com/rshaker2-ops/homeserver/main/unraid/portal-icon.png</Icon>
@@ -21,8 +21,14 @@
   <Config Name="SESSION_SECRET" Target="SESSION_SECRET" Default="" Mode="" Description="At least 32 random characters. Generate with: openssl rand -hex 32" Type="Variable" Display="always" Required="true" Mask="true"></Config>
   <Config Name="ADMIN_EMAILS" Target="ADMIN_EMAILS" Default="" Mode="" Description="Comma-separated Google account emails that get administrator access." Type="Variable" Display="always" Required="true" Mask="false"></Config>
   <Config Name="COOKIE_DOMAIN" Target="COOKIE_DOMAIN" Default="lordblight.com" Mode="" Description="Parent cookie domain, required for NPM forward-auth across the service subdomains." Type="Variable" Display="always" Required="false" Mask="false">lordblight.com</Config>
-  <Config Name="ALLOWED_EMAILS" Target="ALLOWED_EMAILS" Default="" Mode="" Description="Optional: comma-separated emails that may sign in at all (admins always may). Empty = anyone can sign in but sees nothing until granted." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
-  <Config Name="ALLOWED_EMAIL_DOMAINS" Target="ALLOWED_EMAIL_DOMAINS" Default="" Mode="" Description="Optional: comma-separated email domains that may sign in." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="SMTP_HOST" Target="SMTP_HOST" Default="" Mode="" Description="Optional: SMTP server for emailing invitations (Gmail: smtp.gmail.com). Leave empty to hand out invite links manually from the admin UI." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="SMTP_PORT" Target="SMTP_PORT" Default="465" Mode="" Description="SMTP port (Gmail: 465)." Type="Variable" Display="advanced" Required="false" Mask="false">465</Config>
+  <Config Name="SMTP_USER" Target="SMTP_USER" Default="" Mode="" Description="SMTP username (Gmail: your full address)." Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="SMTP_PASS" Target="SMTP_PASS" Default="" Mode="" Description="SMTP password (Gmail: an App Password from Google Account -> Security)." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="MAIL_FROM" Target="MAIL_FROM" Default="" Mode="" Description="Optional From header for invitation emails; defaults to SMTP_USER." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="INVITE_EXPIRY_DAYS" Target="INVITE_EXPIRY_DAYS" Default="14" Mode="" Description="Days an invitation stays valid before it must be resent." Type="Variable" Display="advanced" Required="false" Mask="false">14</Config>
+  <Config Name="ALLOWED_EMAILS" Target="ALLOWED_EMAILS" Default="" Mode="" Description="Optional: comma-separated emails that may sign in WITHOUT an invitation (admins always may). Most setups leave this empty and rely on invitations." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="ALLOWED_EMAIL_DOMAINS" Target="ALLOWED_EMAIL_DOMAINS" Default="" Mode="" Description="Optional: comma-separated email domains that may sign in without an invitation." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="PORTAL_NAME" Target="PORTAL_NAME" Default="lordblight.com" Mode="" Description="Name shown in the header and page titles." Type="Variable" Display="advanced" Required="false" Mask="false">lordblight.com</Config>
   <Config Name="SESSION_MAX_AGE_DAYS" Target="SESSION_MAX_AGE_DAYS" Default="7" Mode="" Description="How long a sign-in lasts before users must sign in again." Type="Variable" Display="advanced" Required="false" Mask="false">7</Config>
 </Container>

@@ -1,7 +1,16 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const express = require('express');
 const { requireAuth, requireAdmin } = require('../middleware');
+const { asyncHandler } = require('../util');
+
+// Anchored and whitespace-free so a crafted address can't smuggle SMTP headers.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function newInviteToken() {
+  return crypto.randomBytes(24).toString('base64url');
+}
 
 function parseServiceForm(body) {
   const errors = [];
@@ -39,7 +48,7 @@ function parseServiceForm(body) {
   };
 }
 
-function adminRoutes({ queries }) {
+function adminRoutes({ queries, config, mailer }) {
   const router = express.Router();
   router.use('/admin', requireAuth, requireAdmin);
 
@@ -53,9 +62,82 @@ function adminRoutes({ queries }) {
       users: queries.listUsers(),
       services: queries.listServices(),
       grants: queries.grantsByUser(),
+      invites: queries.listPendingInvites(),
+      inviteServices: queries.inviteServicesByInvite(),
+      mailEnabled: mailer.enabled,
+      baseUrl: config.baseUrl,
       saved: req.query.saved === '1',
+      invited: typeof req.query.invited === 'string' ? req.query.invited : null,
       error: typeof req.query.error === 'string' ? req.query.error : null,
     });
+  });
+
+  // ----- Invitations -----
+
+  // Creating (or re-creating) an invite always succeeds; emailing it is
+  // best-effort. The pending list always shows a copyable link, so the flow
+  // works even with no SMTP configured.
+  async function emailInvite(req, invite) {
+    if (!mailer.enabled) return 'link';
+    try {
+      await mailer.sendInvite({
+        to: invite.email,
+        inviteUrl: `${config.baseUrl}/invite/${invite.token}`,
+        invitedBy: req.user.name || req.user.email,
+        expiryDays: config.inviteExpiryDays,
+      });
+      return 'sent';
+    } catch (err) {
+      console.error('Invite email failed:', err.message);
+      return 'failed';
+    }
+  }
+
+  router.post(
+    '/admin/invites',
+    asyncHandler(async (req, res) => {
+      const email = String(req.body.email || '').trim().toLowerCase();
+      if (!EMAIL_RE.test(email) || email.length > 200) {
+        return res.redirect('/admin/users?error=' + encodeURIComponent('Enter a valid email address.'));
+      }
+      if (queries.getUserByEmail(email)) {
+        return res.redirect(
+          '/admin/users?error=' + encodeURIComponent('That person already has an account — grant services below instead.')
+        );
+      }
+      const validIds = new Set(queries.listServices().map((s) => s.id));
+      const serviceIds = []
+        .concat(req.body.services || [])
+        .map((value) => Number(value))
+        .filter((id) => validIds.has(id));
+
+      const invite = queries.createInvite({
+        email,
+        token: newInviteToken(),
+        invitedBy: req.user.email,
+        expiryDays: config.inviteExpiryDays,
+        serviceIds,
+      });
+      res.redirect(`/admin/users?invited=${await emailInvite(req, invite)}`);
+    })
+  );
+
+  router.post(
+    '/admin/invites/:id/resend',
+    asyncHandler(async (req, res) => {
+      const invite = queries.getInviteById(Number(req.params.id));
+      if (!invite || invite.accepted_at) {
+        return res.redirect('/admin/users?error=' + encodeURIComponent('Invitation not found.'));
+      }
+      queries.refreshInvite(invite.id, newInviteToken(), config.inviteExpiryDays);
+      const fresh = queries.getInviteById(invite.id);
+      res.redirect(`/admin/users?invited=${await emailInvite(req, fresh)}`);
+    })
+  );
+
+  router.post('/admin/invites/:id/delete', (req, res) => {
+    queries.deleteInvite(Number(req.params.id));
+    res.redirect('/admin/users?saved=1');
   });
 
   router.post('/admin/users/:id', (req, res) => {

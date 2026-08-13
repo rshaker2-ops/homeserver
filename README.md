@@ -3,6 +3,7 @@
 A self-hosted portal for the Unraid box at `192.168.89.106`, living at **https://www.lordblight.com**.
 
 - **Google sign-in** — users authenticate with their Google account; no passwords to manage.
+- **Invitation-only** — you invite each person by email from the admin UI; any other Google account that tries to sign in is turned away without an account being created.
 - **Per-user access** — after signing in, each person sees tiles for only the services you've granted them (Immich, Nextcloud, 2FAuth, …).
 - **Admin UI** — you (the admin) grant/revoke services per user, block users, and add **future services** with a form — no code changes.
 - **Enforced at the proxy** — Nginx Proxy Manager asks the portal on every request (`auth_request`), so someone without a grant can't reach a service even with a direct link. See [docs/nginx-proxy-manager-forward-auth.md](docs/nginx-proxy-manager-forward-auth.md).
@@ -23,8 +24,8 @@ flowchart LR
     P -. "OAuth sign-in" .-> G[Google]
 ```
 
-1. A user opens `www.lordblight.com`, signs in with Google. The portal verifies the ID token, creates the user (with **no access**) and sets a session cookie for `.lordblight.com`.
-2. You grant them services on **Admin → Users**. Their dashboard shows those tiles.
+1. You invite someone on **Admin → Users** — enter their Google email, tick the services they should start with, and the portal emails them an invite link (or hands you the link to send yourself).
+2. They open the link and sign in with Google. The portal verifies the ID token, checks the invitation matches their email, creates their account with the pre-selected grants, and sets a session cookie for `.lordblight.com`. A Google account with no invitation is rejected outright — no account, no session. You can adjust their grants any time on **Admin → Users**.
 3. Each service's NPM proxy host asks `GET /api/authz/<slug>` before proxying. `200` = allow, `401` = send to the portal login, `403` = send to the portal "no access" page. Grants and blocks are checked live in the DB, so revoking access kicks in immediately — even for open sessions.
 
 ## Repo layout
@@ -118,12 +119,13 @@ docker compose up -d --build
 
 Check it: `curl http://192.168.89.106:8899/healthz` → `{"ok":true}`, then open `https://www.lordblight.com`.
 
-### 4. First sign-in and granting access
+### 4. First sign-in and inviting your family
 
-1. Sign in with the Google account listed in `ADMIN_EMAILS` — you'll land on the dashboard with all three seeded tiles (admins see everything).
-2. Have a family member sign in once; they'll see *"No services yet"*.
-3. Open **Users** (top nav) → tick the services they may use → **Save**. Their next page load shows the tiles, and the proxy starts letting them through.
-4. Blocking a user (or *Sign out everywhere*) takes effect immediately. New sign-ins are **default-deny**: anyone with a Google account can authenticate, but they see and reach nothing until you grant it. To stop unknown accounts from even signing in, set `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`.
+1. Sign in with the Google account listed in `ADMIN_EMAILS` — admins never need an invitation, which is how the portal bootstraps. You'll land on the dashboard with all three seeded tiles (admins see everything).
+2. Open **Users** (top nav) → **Invite someone**: enter their Google email and tick the services they should start with. With SMTP configured (see `.env.example`) the portal emails the invitation; without it, copy the invite link from the pending list and send it yourself.
+3. They open the link and sign in with that Google account — their account is created with the services you picked, and the proxy starts letting them through. Grants can be changed any time on the same page.
+4. Anyone *without* a pending invitation is refused at sign-in — no account is created. Invitations expire after 14 days (`INVITE_EXPIRY_DAYS`); expired or mis-sent ones can be resent (fresh link) or revoked from the pending list.
+5. Blocking a user (or *Sign out everywhere*) takes effect immediately.
 
 ### 5. Enforce the grants at the proxy
 
@@ -154,7 +156,10 @@ That's the whole pattern for anything you host later — Jellyfin, Uptime Kuma, 
 | `SESSION_SECRET` | ✅ | ≥32 chars, `openssl rand -hex 32` |
 | `ADMIN_EMAILS` | ✅ (practically) | Comma-separated admin Google emails; applied on every sign-in |
 | `COOKIE_DOMAIN` | for forward-auth | Parent domain (`lordblight.com`) so subdomains see the session |
-| `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` | – | If set, only these may sign in at all (admins always may) |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | for emailed invites | SMTP relay for invitation emails (Gmail: `smtp.gmail.com` / `465` / your address / an App Password). Unset = invites still work via copyable links |
+| `MAIL_FROM` | – | From header for invites (default: `SMTP_USER`) |
+| `INVITE_EXPIRY_DAYS` | – | How long invitations stay valid (default `14`) |
+| `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` | – | Extra emails/domains that may sign in **without** an invitation (admins always may). Most setups leave these unset |
 | `PORTAL_NAME` | – | Branding (default `lordblight.com`) |
 | `PORT` / `DATA_DIR` / `SESSION_MAX_AGE_DAYS` | – | Defaults: `8899` / `/data` / `7` |
 
@@ -176,7 +181,8 @@ npm test               # 24 tests, no Google account needed
 
 ## Security model (and honest limits)
 
-- Default-deny: a fresh Google sign-in has zero access until granted; unknown services and disabled services also deny.
+- Invitation-only registration: sign-in is rejected outright unless the Google account was invited by an admin, is on an explicit allowlist, or is an admin itself — strangers never get an account or a session. Invitations are bound to the invited email (the link alone grants nothing), expire, and can be revoked.
+- Default-deny: a fresh account has only the access pre-granted on its invitation; unknown services and disabled services also deny.
 - Authorization is checked **live** on every request the proxy forwards — revocations and blocks are instant, and blocking also destroys the user's sessions.
 - Sessions: HttpOnly, Secure, SameSite=Lax cookies signed with `SESSION_SECRET`; OAuth uses `state` + PKCE and requires a verified email; login rotates the session ID; forms are CSRF-protected; `rd` redirects only allow `*.lordblight.com`.
 - **Limits to know about:** enforcement happens at NPM's vhosts, so LAN clients can still hit `192.168.89.106:<port>` directly — that's your escape hatch if the portal is ever down, and it's fine as long as only ports 80/443 are forwarded from the internet. Out of the box this portal is perimeter auth + launchpad, not SSO *into* the apps — but [docs/in-app-sso.md](docs/in-app-sso.md) closes that gap: FileBrowser and 2FAuth consume the portal's identity headers for automatic sign-in, and Immich/Nextcloud log in with the same Google account via their native OIDC support. (If needs ever outgrow this — groups, MFA policies — [Authentik](https://goauthentik.io/) is the graduation path.)
