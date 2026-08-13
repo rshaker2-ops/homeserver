@@ -35,6 +35,7 @@ flowchart LR
 | `portal/.env.example` | Configuration template |
 | `docker-compose.yml` | Runs the portal on port **8899** |
 | `docs/nginx-proxy-manager-forward-auth.md` | Per-service NPM snippets + troubleshooting |
+| `unraid/portal-template.xml` | Unraid Docker template (Docker tab → Add Container) |
 | `.github/workflows/portal.yml` | CI: tests on PRs, publishes `ghcr.io/rshaker2-ops/homeserver-portal` on `main` |
 
 ## Setup
@@ -81,9 +82,18 @@ ADMIN_EMAILS=your-google-account@gmail.com
 COOKIE_DOMAIN=lordblight.com
 ```
 
-Then either:
+Then pick one of three ways to run it. Options A and B pull the prebuilt image, which CI publishes after this repo's first merge to `main` — make the GHCR package public once under GitHub → Packages → `homeserver-portal` → Package settings (or `docker login ghcr.io` on the server).
 
-**Option A — prebuilt image** (published by CI after this repo's first merge to `main`; make the GHCR package public once under GitHub → Packages → `homeserver-portal` → Package settings, or `docker login ghcr.io` on the server):
+**Option A — Unraid Docker template (most Unraid-native).** Installs from the Docker tab with icon, WebUI link and update checks:
+
+```bash
+curl -o /boot/config/plugins/dockerMan/templates-user/my-homeserver-portal.xml \
+  https://raw.githubusercontent.com/rshaker2-ops/homeserver/main/unraid/portal-template.xml
+```
+
+Then Unraid UI → **Docker → Add Container → Template: homeserver-portal**, fill in the Google credentials / `SESSION_SECRET` / `ADMIN_EMAILS` fields (everything else is pre-filled for lordblight.com), and Apply.
+
+**Option B — plain `docker run`**:
 
 ```bash
 docker run -d \
@@ -95,7 +105,7 @@ docker run -d \
   ghcr.io/rshaker2-ops/homeserver-portal:latest
 ```
 
-**Option B — build from this repo** (e.g. with the Compose Manager plugin):
+**Option C — build from this repo** (e.g. with the Compose Manager plugin; no GHCR image needed):
 
 ```bash
 git clone https://github.com/rshaker2-ops/homeserver.git
