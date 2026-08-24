@@ -299,6 +299,8 @@ p { margin: 0.4rem 0; }
   border-top: 1px solid var(--border);
 }
 .invite-row:first-of-type { border-top: 0; padding-top: 0.25rem; }
+.device-list { border-top: 1px solid var(--border); padding-top: 0.75rem; margin-top: 0.9rem; }
+.device-list-title { margin-bottom: 0.25rem; }
 .invite-info { flex: 1; min-width: 260px; }
 .invite-link {
   width: 100%;

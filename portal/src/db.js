@@ -67,6 +67,19 @@ const MIGRATIONS = [
     PRIMARY KEY (invite_id, service_id)
   );
   `,
+  `
+  CREATE TABLE app_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    device_name TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_used_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
+  );
+  CREATE INDEX idx_app_tokens_user ON app_tokens (user_id);
+  CREATE INDEX idx_app_tokens_expires ON app_tokens (expires_at);
+  `,
 ];
 
 const DEFAULT_SERVICES = [

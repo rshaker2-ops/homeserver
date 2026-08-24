@@ -62,6 +62,7 @@ function adminRoutes({ queries, config, mailer }) {
       users: queries.listUsers(),
       services: queries.listServices(),
       grants: queries.grantsByUser(),
+      appTokens: queries.appTokensByUser(),
       invites: queries.listPendingInvites(),
       inviteServices: queries.inviteServicesByInvite(),
       mailEnabled: mailer.enabled,
@@ -158,13 +159,27 @@ function adminRoutes({ queries, config, mailer }) {
 
     queries.setUserFlags(target.id, isAdmin, isBlocked);
     queries.setUserServices(target.id, serviceIds);
-    if (isBlocked) queries.deleteSessionsForUser(target.id); // sign them out everywhere
+    if (isBlocked) {
+      // Sign them out everywhere: web sessions and app device tokens alike.
+      queries.deleteSessionsForUser(target.id);
+      queries.deleteAppTokensForUser(target.id);
+    }
     res.redirect('/admin/users?saved=1');
   });
 
   router.post('/admin/users/:id/signout', (req, res) => {
     const target = queries.getUserById(Number(req.params.id));
-    if (target) queries.deleteSessionsForUser(target.id);
+    if (target) {
+      queries.deleteSessionsForUser(target.id);
+      queries.deleteAppTokensForUser(target.id);
+    }
+    res.redirect('/admin/users?saved=1');
+  });
+
+  // Revoke a single app device token — the target device loses access on its
+  // very next request.
+  router.post('/admin/users/:id/app-tokens/:tokenId/delete', (req, res) => {
+    queries.deleteAppTokenForUser(Number(req.params.tokenId), Number(req.params.id));
     res.redirect('/admin/users?saved=1');
   });
 
@@ -173,6 +188,7 @@ function adminRoutes({ queries, config, mailer }) {
     if (!target) return res.redirect('/admin/users?error=User not found.');
     if (target.id === req.user.id) return res.redirect('/admin/users?error=You cannot delete yourself.');
     queries.deleteSessionsForUser(target.id);
+    queries.deleteAppTokensForUser(target.id);
     queries.deleteUser(target.id);
     res.redirect('/admin/users?saved=1');
   });

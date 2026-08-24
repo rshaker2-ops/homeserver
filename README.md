@@ -37,6 +37,7 @@ flowchart LR
 | `docker-compose.yml` | Runs the portal on port **8899** |
 | `docs/nginx-proxy-manager-forward-auth.md` | Per-service NPM snippets + troubleshooting |
 | `docs/in-app-sso.md` | Same Google account *inside* the apps (FileBrowser/2FAuth header auth, Immich/Nextcloud OIDC) |
+| `docs/hearth-mobile-app-auth.md` | Hearth mobile app behind the portal (per-device `X-Portal-Token` flow) |
 | `unraid/portal-template.xml` | Unraid Docker template (Docker tab → Add Container) |
 | `.github/workflows/portal.yml` | CI: tests on PRs, publishes `ghcr.io/rshaker2-ops/homeserver-portal` on `main` |
 

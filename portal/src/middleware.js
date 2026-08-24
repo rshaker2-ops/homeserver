@@ -16,7 +16,10 @@ function securityHeaders(req, res, next) {
 
 // Loads the user fresh from the DB on every request, so blocking a user or
 // revoking a grant takes effect immediately — sessions never cache roles.
-function attachUser(queries) {
+// Besides the portal_session cookie, API routes also accept an X-Portal-Token
+// header (the native apps' per-device credential); it goes through the same
+// live lookup, so revoking a device or blocking a user bites instantly too.
+function attachUser(queries, config) {
   return (req, res, next) => {
     req.user = null;
     const id = req.session && req.session.userId;
@@ -24,6 +27,13 @@ function attachUser(queries) {
       const user = queries.getUserById(id);
       if (user) req.user = user;
       else req.session.userId = null;
+    }
+    if (!req.user && req.path.startsWith('/api/')) {
+      const raw = req.get('x-portal-token');
+      if (raw) {
+        const user = queries.getUserByAppToken(raw, config.appTokenExpiryDays);
+        if (user) req.user = user;
+      }
     }
     next();
   };

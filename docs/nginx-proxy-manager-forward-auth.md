@@ -62,9 +62,16 @@ location / {
 
 Bonus: with this gate in place, 2FAuth can consume the forwarded identity for automatic sign-in (no second login) — see [in-app-sso.md](in-app-sso.md) for setup steps and limitations.
 
-## Immich (`im.lordblight.com`) — gate the web UI, keep the mobile app working
+## Immich / Hearth (`im.lordblight.com`) — full gate, `/api` included
 
-The Immich mobile app and API keys authenticate themselves against `/api`, and public share links live under `/share` — both are bypassed and rely on Immich's own auth. Slug: `immich`.
+Everything — the web UI **and** `/api` — goes through the portal. Browsers authenticate with the `portal_session` cookie; the Hearth mobile app authenticates with an `X-Portal-Token` header it obtains from the portal's native-app flow (`/auth/app/start`, see [hearth-mobile-app-auth.md](hearth-mobile-app-auth.md)). Since `auth_request` runs as a subrequest of the original request, the client's cookie *and* its `X-Portal-Token` header reach the portal automatically; the snippet re-declares the token header explicitly anyway so it survives any NPM template quirks.
+
+Only two narrow bypasses remain, both required and both harmless:
+
+- `/api/oauth/mobile-redirect` — during the app's Immich OIDC login this one hop is made by the system browser, which has neither the portal cookie nor the app's token. It only ever 302s back into the app; it serves no data.
+- `/share` — public share links; Immich's own share tokens do the auth.
+
+Slug: `immich`.
 
 ```nginx
 # --- portal forward-auth: immich ---
@@ -77,6 +84,7 @@ location = /portal-authz {
     proxy_pass http://192.168.89.106:8899/api/authz/immich;
     proxy_pass_request_body off;
     proxy_set_header Content-Length "";
+    proxy_set_header X-Portal-Token $http_x_portal_token;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Host $host;
     proxy_set_header X-Forwarded-Uri $request_uri;
@@ -86,8 +94,25 @@ location = /portal-authz {
 error_page 401 =302 https://www.lordblight.com/login?rd=$scheme://$http_host$request_uri;
 error_page 403 =302 https://www.lordblight.com/denied?service=immich;
 
-# Mobile app / API keys / share-page data: Immich's own auth, no portal cookie.
+# System-browser hop of the app's Immich OIDC login (redirect-only, no data).
+location = /api/oauth/mobile-redirect {
+    proxy_pass $forward_scheme://$server:$port;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Scheme $scheme;
+}
+
+# Gated API: portal cookie (browser) or X-Portal-Token (Hearth app).
 location /api {
+    auth_request /portal-authz;
+    auth_request_set $portal_user $upstream_http_remote_user;
+    auth_request_set $portal_email $upstream_http_remote_email;
+    proxy_set_header Remote-User $portal_user;
+    proxy_set_header Remote-Email $portal_email;
+
     proxy_pass $forward_scheme://$server:$port;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
@@ -128,6 +153,8 @@ location / {
     proxy_set_header Connection $http_connection;
 }
 ```
+
+> ⚠️ **Vanilla Immich apps and raw API keys stop working over the internet** once `/api` is gated: only the Hearth app (which sends `X-Portal-Token`) can reach the API from outside. On the LAN, `http://192.168.89.106:2283` remains the ungated escape hatch, same as every other service here.
 
 ## Nextcloud (`nc.lordblight.com`) — think twice
 
@@ -174,7 +201,8 @@ curl -s -o /dev/null -w '%{http_code}\n' https://www.lordblight.com/api/authz/im
 - Open `https://im.lordblight.com` in a private window → you land on the portal login.
 - Sign in as a user **without** an Immich grant → you land on the portal's "no access" page.
 - Sign in as a granted user → Immich loads; `Remote-Email` shows up in Immich's proxy headers.
-- Immich mobile app (server URL `https://im.lordblight.com`) still syncs — `/api` is bypassed.
+- `curl -s -o /dev/null -w '%{http_code}\n' https://im.lordblight.com/api/server/ping` → `302` (anonymous API requests bounce to the portal — the gate covers `/api`).
+- Hearth mobile app (server URL `https://im.lordblight.com`) still syncs — it sends `X-Portal-Token` after its portal sign-in ([hearth-mobile-app-auth.md](hearth-mobile-app-auth.md)); revoking its device token in **Admin → Users** cuts it off on the next request.
 
 ## Troubleshooting
 

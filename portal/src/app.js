@@ -50,7 +50,7 @@ function createApp(config) {
     })
   );
   app.use(express.urlencoded({ extended: false }));
-  app.use(attachUser(queries));
+  app.use(attachUser(queries, config));
   app.use(csrfProtection(config));
   app.use((req, res, next) => {
     res.locals.user = req.user;

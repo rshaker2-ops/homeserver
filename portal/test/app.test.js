@@ -562,6 +562,202 @@ test('denied page names the service', async () => {
   assert.match(res.text, /Nextcloud/);
 });
 
+// ---- Native-app token flow (X-Portal-Token) --------------------------------
+
+function mintAppToken(queries, email, deviceName = 'Test Phone') {
+  const user = queries.getUserByEmail(email);
+  return queries.createAppToken({ userId: user.id, deviceName, expiryDays: 30 });
+}
+
+test('app start: rejects missing, malformed, and non-allowlisted rd schemes', async () => {
+  const { app } = makeApp();
+  await request(app).get('/auth/app/start').expect(400);
+  await request(app).get('/auth/app/start?rd=https://evil.com/cb').expect(400);
+  await request(app).get('/auth/app/start?rd=app.immich:///oauth-callback').expect(400);
+  await request(app).get('/auth/app/start?rd=hearth://cb?x=1').expect(400); // no query allowed
+  const ok = await request(app).get('/auth/app/start?rd=hearth://portal-callback').expect(302);
+  assert.match(ok.headers.location, /^https:\/\/accounts\.google\.com\//);
+});
+
+test('app start: honors APP_CALLBACK_SCHEMES allowlist', async () => {
+  const { app } = makeApp({ APP_CALLBACK_SCHEMES: 'myapp' });
+  await request(app).get('/auth/app/start?rd=hearth://portal-callback').expect(400);
+  await request(app).get('/auth/app/start?rd=myapp://portal-callback').expect(302);
+});
+
+test('app start: an existing portal session mints a token without a Google round-trip', async () => {
+  const { app, queries } = makeApp();
+  const agent = await loginAgent(app, ADMIN);
+  const res = await agent.get('/auth/app/start?rd=hearth://portal-callback&device=iPhone 15 Pro').expect(302);
+  const match = /^hearth:\/\/portal-callback\?token=([A-Za-z0-9_-]+)$/.exec(res.headers.location);
+  assert.ok(match, `token redirect, got ${res.headers.location}`);
+
+  const user = queries.getUserByAppToken(match[1], 30);
+  assert.equal(user.email, ADMIN);
+  const devices = queries.appTokensByUser().get(user.id);
+  assert.equal(devices.length, 1);
+  assert.equal(devices[0].device_name, 'iPhone 15 Pro');
+});
+
+test('app flow failures redirect back into the app with an error code', async () => {
+  const { app } = makeApp();
+  const agent = request.agent(app);
+  await agent.get('/auth/app/start?rd=hearth://portal-callback').expect(302);
+  const res = await agent.get('/auth/google/callback?code=x&state=wrong').expect(302);
+  assert.equal(res.headers.location, 'hearth://portal-callback?error=state');
+});
+
+test('X-Portal-Token authenticates /api routes and respects grants', async () => {
+  const { app, queries } = makeApp();
+  invite(queries, FRIEND);
+  await loginAgent(app, FRIEND);
+  const friend = queries.getUserByEmail(FRIEND);
+  const token = mintAppToken(queries, FRIEND);
+
+  // No grant yet -> authz denies, /api/me still identifies.
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', token).expect(403);
+  const me = await request(app).get('/api/me').set('X-Portal-Token', token).expect(200);
+  assert.equal(me.body.email, FRIEND);
+
+  queries.setUserServices(friend.id, [queries.getServiceBySlug('immich').id]);
+  const az = await request(app).get('/api/authz/immich').set('X-Portal-Token', token).expect(200);
+  assert.equal(az.headers['remote-email'], FRIEND);
+  await request(app).post('/api/authz/immich').set('X-Portal-Token', token).expect(200);
+  await request(app).get('/api/authz/nextcloud').set('X-Portal-Token', token).expect(403);
+
+  // Garbage and near-miss tokens stay anonymous.
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', 'nope').expect(401);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', token.slice(1)).expect(401);
+});
+
+test('X-Portal-Token is only honored on /api paths', async () => {
+  const { app, queries } = makeApp();
+  invite(queries, FRIEND);
+  await loginAgent(app, FRIEND);
+  const token = mintAppToken(queries, FRIEND);
+  const res = await request(app).get('/').set('X-Portal-Token', token).expect(302);
+  assert.match(res.headers.location, /^\/login\?rd=/);
+});
+
+test('app tokens expire, and use slides the expiry forward', async () => {
+  const { app, db, queries } = makeApp();
+  invite(queries, FRIEND);
+  await loginAgent(app, FRIEND);
+  const friend = queries.getUserByEmail(FRIEND);
+  queries.setUserServices(friend.id, [queries.getServiceBySlug('immich').id]);
+  const token = mintAppToken(queries, FRIEND);
+
+  // Stale-but-valid token: a use refreshes last_used_at and expires_at.
+  db.prepare(
+    `UPDATE app_tokens SET last_used_at = datetime('now', '-2 hours'), expires_at = datetime('now', '+1 day')`
+  ).run();
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', token).expect(200);
+  const refreshed = db.prepare('SELECT * FROM app_tokens').get();
+  assert.ok(refreshed.expires_at > refreshed.created_at);
+  assert.equal(
+    db.prepare(`SELECT COUNT(*) AS c FROM app_tokens WHERE expires_at > datetime('now', '+20 days')`).get().c,
+    1,
+    'expiry slid forward to ~30 days out'
+  );
+
+  // Hard-expired token no longer authenticates.
+  db.prepare(`UPDATE app_tokens SET expires_at = datetime('now', '-1 hour')`).run();
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', token).expect(401);
+});
+
+test('blocking a user bites app tokens instantly (live lookup + token purge)', async () => {
+  const { app, queries } = makeApp();
+  invite(queries, FRIEND);
+  await loginAgent(app, FRIEND);
+  const friend = queries.getUserByEmail(FRIEND);
+  queries.setUserServices(friend.id, [queries.getServiceBySlug('immich').id]);
+  const token = mintAppToken(queries, FRIEND);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', token).expect(200);
+
+  // Even with the token row still present, a blocked user fails authz.
+  queries.setUserFlags(friend.id, false, true);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', token).expect(403);
+
+  // Blocking via the admin UI also purges the device tokens entirely.
+  queries.setUserFlags(friend.id, false, false);
+  const adminAgent = await loginAgent(app, ADMIN);
+  const csrf = await csrfFrom(adminAgent, '/admin/users');
+  await adminAgent
+    .post(`/admin/users/${friend.id}`)
+    .type('form')
+    .send(formBody({ _csrf: csrf, is_blocked: 'on' }))
+    .expect(302);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', token).expect(401);
+});
+
+test('admin can revoke a single device; sign-out-everywhere and delete purge all tokens', async () => {
+  const { app, queries } = makeApp();
+  invite(queries, FRIEND);
+  await loginAgent(app, FRIEND);
+  const friend = queries.getUserByEmail(FRIEND);
+  queries.setUserServices(friend.id, [queries.getServiceBySlug('immich').id]);
+  const phone = mintAppToken(queries, FRIEND, 'Phone');
+  const tablet = mintAppToken(queries, FRIEND, 'Tablet');
+
+  const adminAgent = await loginAgent(app, ADMIN);
+  const csrf = await csrfFrom(adminAgent, '/admin/users');
+
+  // Devices are listed on the users page.
+  const page = await adminAgent.get('/admin/users').expect(200);
+  assert.match(page.text, /Phone/);
+  assert.match(page.text, /Tablet/);
+
+  // Revoking one device leaves the other working.
+  const phoneRow = queries.appTokensByUser().get(friend.id).find((d) => d.device_name === 'Phone');
+  await adminAgent
+    .post(`/admin/users/${friend.id}/app-tokens/${phoneRow.id}/delete`)
+    .type('form')
+    .send(formBody({ _csrf: csrf }))
+    .expect(302);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', phone).expect(401);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', tablet).expect(200);
+
+  // A token id under the wrong user is a no-op.
+  const tabletRow = queries.appTokensByUser().get(friend.id).find((d) => d.device_name === 'Tablet');
+  const admin = queries.getUserByEmail(ADMIN);
+  await adminAgent
+    .post(`/admin/users/${admin.id}/app-tokens/${tabletRow.id}/delete`)
+    .type('form')
+    .send(formBody({ _csrf: csrf }))
+    .expect(302);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', tablet).expect(200);
+
+  // Sign out everywhere purges the remaining device token.
+  await adminAgent
+    .post(`/admin/users/${friend.id}/signout`)
+    .type('form')
+    .send(formBody({ _csrf: csrf }))
+    .expect(302);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', tablet).expect(401);
+
+  // Deleting the user cascades away any newly minted tokens too.
+  const last = mintAppToken(queries, FRIEND, 'Last');
+  await adminAgent
+    .post(`/admin/users/${friend.id}/delete`)
+    .type('form')
+    .send(formBody({ _csrf: csrf }))
+    .expect(302);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', last).expect(401);
+});
+
+test('the app can revoke its own token via /api/app/logout', async () => {
+  const { app, queries } = makeApp();
+  invite(queries, FRIEND);
+  await loginAgent(app, FRIEND);
+  const friend = queries.getUserByEmail(FRIEND);
+  queries.setUserServices(friend.id, [queries.getServiceBySlug('immich').id]);
+  const token = mintAppToken(queries, FRIEND);
+
+  await request(app).post('/api/app/logout').expect(401); // no token
+  await request(app).post('/api/app/logout').set('X-Portal-Token', token).expect(200);
+  await request(app).get('/api/authz/immich').set('X-Portal-Token', token).expect(401);
+});
+
 test('config validation fails fast on missing vars and weak secrets', () => {
   assert.throws(() => loadConfig({}), /Missing required environment variables/);
   assert.throws(
