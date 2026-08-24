@@ -79,7 +79,7 @@ No header auth here; instead Immich logs in against Google directly, which feels
    - Optional **Auto launch**: skips Immich's login page straight to Google — effectively invisible SSO for the web UI
 3. Anyone who already had a password-based Immich account can link it under Account Settings → OAuth so both identities are the same user.
 
-Remember the forward-auth snippet for Immich deliberately bypasses `/api` and `/share`, so the mobile app and public share links keep working regardless.
+The forward-auth snippet for Immich gates `/api` too: the Hearth mobile app first signs in at the portal (`/auth/app/start`) and sends the resulting `X-Portal-Token` with every request — see [hearth-mobile-app-auth.md](hearth-mobile-app-auth.md). Only `/api/oauth/mobile-redirect` (the system-browser hop of the app's Google login) and `/share` (public share links) stay bypassed.
 
 ## Nextcloud (`nc.lordblight.com`)
 

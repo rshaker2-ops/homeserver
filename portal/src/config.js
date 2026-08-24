@@ -57,6 +57,9 @@ function loadConfig(env = process.env) {
     cookieDomain,
     portalName: env.PORTAL_NAME || 'lordblight.com',
     sessionMaxAgeDays: Number(env.SESSION_MAX_AGE_DAYS) || 7,
+    appTokenExpiryDays: Number(env.APP_TOKEN_EXPIRY_DAYS) || 30,
+    // Custom URL schemes the native-app token flow may redirect back to.
+    appCallbackSchemes: parseList(env.APP_CALLBACK_SCHEMES || 'hearth'),
     secureCookies: baseUrl.startsWith('https://'),
     testLogin: env.PORTAL_TEST_LOGIN === '1' && isTest,
     inviteExpiryDays: Number(env.INVITE_EXPIRY_DAYS) || 14,

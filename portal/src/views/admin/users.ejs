@@ -77,7 +77,7 @@
 <% } %>
 
 <% for (const u of users) { %>
-  <% const g = grants.get(u.id) || new Set(); const isSelf = u.id === user.id; %>
+  <% const g = grants.get(u.id) || new Set(); const isSelf = u.id === user.id; const devices = appTokens.get(u.id) || []; %>
   <section class="panel">
     <form method="post" action="/admin/users/<%= u.id %>">
       <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -117,6 +117,29 @@
         <button class="btn btn-primary" type="submit">Save</button>
       </div>
     </form>
+    <% if (devices.length > 0) { %>
+      <div class="device-list">
+        <div class="muted small device-list-title">App devices — each token is revocable on its own; the device loses access on its next request.</div>
+        <% for (const d of devices) { %>
+          <div class="invite-row">
+            <div class="invite-info">
+              <div class="user-name">📱 <%= d.device_name || 'Unnamed device' %></div>
+              <div class="muted small">
+                signed in <%= (d.created_at || '').slice(0, 10) %> ·
+                last used <%= (d.last_used_at || '—').slice(0, 16) %> ·
+                expires <%= (d.expires_at || '').slice(0, 10) %>
+              </div>
+            </div>
+            <div class="row-actions">
+              <form method="post" action="/admin/users/<%= u.id %>/app-tokens/<%= d.id %>/delete" class="inline-form">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button class="btn btn-danger btn-sm" type="submit">Revoke</button>
+              </form>
+            </div>
+          </div>
+        <% } %>
+      </div>
+    <% } %>
     <% if (!isSelf) { %>
       <div class="row-actions row-actions-danger">
         <form method="post" action="/admin/users/<%= u.id %>/signout">

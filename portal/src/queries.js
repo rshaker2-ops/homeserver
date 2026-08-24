@@ -1,5 +1,13 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
+// App tokens are opaque bearer secrets for the native mobile apps. Only the
+// SHA-256 of a token is stored, so the DB never holds anything replayable.
+function hashAppToken(raw) {
+  return crypto.createHash('sha256').update(String(raw)).digest('hex');
+}
+
 function createQueries(db) {
   const stmts = {
     userById: db.prepare('SELECT * FROM users WHERE id = ?'),
@@ -74,6 +82,27 @@ function createQueries(db) {
     ),
     allInviteServices: db.prepare('SELECT invite_id, service_id FROM invite_services'),
     inviteServiceIds: db.prepare('SELECT service_id FROM invite_services WHERE invite_id = ?'),
+
+    insertAppToken: db.prepare(
+      `INSERT INTO app_tokens (token_hash, user_id, device_name, expires_at)
+       VALUES (?, ?, ?, datetime('now', ?))`
+    ),
+    userByAppTokenHash: db.prepare(
+      `SELECT t.id AS app_token_id, u.* FROM app_tokens t
+       JOIN users u ON u.id = t.user_id
+       WHERE t.token_hash = ? AND t.expires_at > datetime('now')`
+    ),
+    touchAppToken: db.prepare(
+      `UPDATE app_tokens SET last_used_at = datetime('now'), expires_at = datetime('now', ?)
+       WHERE id = ? AND last_used_at < datetime('now', '-1 hour')`
+    ),
+    allAppTokens: db.prepare(
+      `SELECT id, user_id, device_name, created_at, last_used_at, expires_at
+       FROM app_tokens ORDER BY last_used_at DESC, id DESC`
+    ),
+    deleteAppTokenForUser: db.prepare('DELETE FROM app_tokens WHERE id = ? AND user_id = ?'),
+    deleteAppTokenByHash: db.prepare('DELETE FROM app_tokens WHERE token_hash = ?'),
+    deleteAppTokensForUser: db.prepare('DELETE FROM app_tokens WHERE user_id = ?'),
   };
 
   // Users are keyed by the immutable Google `sub`; email/name/picture refresh
@@ -150,6 +179,35 @@ function createQueries(db) {
     return map;
   }
 
+  // Mints an opaque per-device token for the native app flow. The raw token
+  // is returned exactly once; only its hash is persisted.
+  function createAppToken({ userId, deviceName, expiryDays }) {
+    const token = crypto.randomBytes(32).toString('base64url');
+    stmts.insertAppToken.run(hashAppToken(token), userId, deviceName || null, `+${expiryDays} days`);
+    return token;
+  }
+
+  // Resolves a raw X-Portal-Token to its user. Expiry is sliding: any use
+  // pushes expires_at out to now + expiryDays again (throttled to at most one
+  // write per hour per token, since this runs on every proxied API request).
+  function getUserByAppToken(raw, expiryDays) {
+    if (!raw || typeof raw !== 'string' || raw.length > 200) return null;
+    const row = stmts.userByAppTokenHash.get(hashAppToken(raw));
+    if (!row) return null;
+    stmts.touchAppToken.run(`+${expiryDays} days`, row.app_token_id);
+    const { app_token_id, ...user } = row;
+    return user;
+  }
+
+  function appTokensByUser() {
+    const map = new Map();
+    for (const row of stmts.allAppTokens.all()) {
+      if (!map.has(row.user_id)) map.set(row.user_id, []);
+      map.get(row.user_id).push(row);
+    }
+    return map;
+  }
+
   return {
     getUserById: (id) => stmts.userById.get(id),
     getUserBySub: (sub) => stmts.userBySub.get(sub),
@@ -180,6 +238,12 @@ function createQueries(db) {
     refreshInvite: (id, token, expiryDays) => stmts.refreshInvite.run(token, `+${expiryDays} days`, id),
     deleteInvite: (id) => stmts.deleteInvite.run(id),
     inviteServicesByInvite,
+    createAppToken,
+    getUserByAppToken,
+    appTokensByUser,
+    deleteAppTokenForUser: (id, userId) => stmts.deleteAppTokenForUser.run(id, userId),
+    revokeAppToken: (raw) => stmts.deleteAppTokenByHash.run(hashAppToken(raw)),
+    deleteAppTokensForUser: (userId) => stmts.deleteAppTokensForUser.run(userId),
   };
 }
 

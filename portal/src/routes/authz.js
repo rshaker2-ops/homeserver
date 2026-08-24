@@ -24,6 +24,16 @@ function authzRoutes({ queries }) {
     res.status(200).type('text').send('ok');
   });
 
+  // Lets the native app revoke its own device token ("sign out of the
+  // portal"). Bearer-token authenticated — no cookies involved, so the /api
+  // CSRF exemption is safe here.
+  router.post('/api/app/logout', (req, res) => {
+    const raw = req.get('x-portal-token');
+    if (!raw || !req.user) return res.status(401).json({ error: 'unauthenticated' });
+    queries.revokeAppToken(raw);
+    res.json({ ok: true });
+  });
+
   // Small identity endpoint, handy when debugging proxy configuration.
   router.get('/api/me', (req, res) => {
     if (!req.user) return res.status(401).json({ error: 'unauthenticated' });

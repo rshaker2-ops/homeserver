@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const express = require('express');
-const { safeRedirectTarget, isEmailAllowlisted, asyncHandler } = require('../util');
+const { safeRedirectTarget, safeAppRedirectTarget, isEmailAllowlisted, asyncHandler } = require('../util');
 
 const LOGIN_ERRORS = {
   state: 'Your sign-in attempt expired — please try again.',
@@ -68,13 +68,56 @@ function authRoutes({ config, queries, google }) {
     })
   );
 
+  // Native-app sign-in (the Hearth mobile app). Same Google OAuth and the same
+  // invitation gate as the browser, but instead of a session cookie the flow
+  // ends by handing an opaque per-device token back to the app via its custom
+  // scheme: <rd>?token=… — or <rd>?error=<code> when the gate refuses.
+  router.get(
+    '/auth/app/start',
+    asyncHandler(async (req, res) => {
+      const appRd = safeAppRedirectTarget(req.query.rd, config);
+      if (!appRd) {
+        return res.status(400).render('error', {
+          title: 'Bad request',
+          status: 400,
+          message: 'Unknown app callback. The rd parameter must use an allowlisted app scheme.',
+        });
+      }
+      const deviceName = String(req.query.device || '').replace(/[^\x20-\x7E]/g, '').slice(0, 80) || null;
+
+      // The in-app browser may already hold a portal session (it shares
+      // cookies with the system browser) — then no Google round-trip is needed.
+      if (req.user) {
+        if (req.user.is_blocked) return res.redirect(`${appRd}?error=blocked`);
+        const token = queries.createAppToken({
+          userId: req.user.id,
+          deviceName,
+          expiryDays: config.appTokenExpiryDays,
+        });
+        return res.redirect(`${appRd}?token=${encodeURIComponent(token)}`);
+      }
+
+      const state = crypto.randomBytes(16).toString('hex');
+      const { url, codeVerifier } = await google.beginAuth(state);
+      req.session.oauth = { state, codeVerifier, appRd, deviceName };
+      res.redirect(url);
+    })
+  );
+
   router.get(
     '/auth/google/callback',
     asyncHandler(async (req, res, next) => {
       const saved = req.session.oauth;
       delete req.session.oauth; // states are single-use
+      // App-flow failures go back into the app so it can show the reason;
+      // browser failures go to the login page as before.
+      const fail = (code) =>
+        saved && saved.appRd
+          ? res.redirect(`${saved.appRd}?error=${code}`)
+          : res.redirect(`/login?error=${code}`);
+
       if (!saved || typeof req.query.code !== 'string' || req.query.state !== saved.state) {
-        return res.redirect('/login?error=state');
+        return fail('state');
       }
 
       let profile;
@@ -82,21 +125,34 @@ function authRoutes({ config, queries, google }) {
         profile = await google.completeAuth(req.query.code, saved.codeVerifier);
       } catch (err) {
         console.error('Google token exchange failed:', err.message);
-        return res.redirect('/login?error=google');
+        return fail('google');
       }
 
       const email = (profile.email || '').toLowerCase();
-      if (!email || profile.email_verified !== true) return res.redirect('/login?error=unverified');
+      if (!email || profile.email_verified !== true) return fail('unverified');
 
       const gate = signInGate({ sub: profile.sub, email });
-      if (!gate.allowed) return res.redirect('/login?error=notinvited');
+      if (!gate.allowed) return fail('notinvited');
 
       const user = queries.upsertGoogleUser(
         { sub: profile.sub, email, name: profile.name, picture: profile.picture },
         config.adminEmails.includes(email)
       );
       if (gate.invite) queries.acceptInvite(gate.invite.id, user.id);
-      if (user.is_blocked) return res.redirect('/login?error=blocked');
+      if (user.is_blocked) return fail('blocked');
+
+      if (saved.appRd) {
+        const token = queries.createAppToken({
+          userId: user.id,
+          deviceName: saved.deviceName,
+          expiryDays: config.appTokenExpiryDays,
+        });
+        // The ephemeral in-app browser needs no portal session — the token is
+        // the app's credential from here on.
+        return req.session.destroy(() => {
+          res.redirect(`${saved.appRd}?token=${encodeURIComponent(token)}`);
+        });
+      }
 
       const rd = saved.rd || '/';
       req.session.regenerate((err) => {
