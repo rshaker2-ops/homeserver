@@ -8,9 +8,8 @@ repo. It serves no content of its own — every request is redirected to
 flowchart LR
     U[Browser] -->|1. where is 300zx.org?| R53[Route 53\nA record = current WAN IP]
     U -->|2. https| NPM[Nginx Proxy Manager\n:443, holds the cert]
-    NPM -->|3. http| RD[300zx-redirect\n192.168.89.106:8088]
-    RD -->|4. 302| U
-    U -->|5. https| T[shakersoftwareworks.com]
+    NPM -->|3. 302| U
+    U -->|4. https| T[shakersoftwareworks.com]
     L[Lambda] -.->|keeps A record current| R53
 ```
 
@@ -20,7 +19,7 @@ Three pieces in three places, and they are independent of each other:
 |---|---|---|
 | `A 300zx.org` | Route 53 | answers "what IP?" — nothing else |
 | `443 -> 192.168.89.106` | the router | gets the connection to the box |
-| the TLS certificate | **NPM** | proves identity, then hands off to the redirector |
+| the TLS certificate | **NPM** | proves identity, then answers the 302 |
 
 A certificate is never attached to DNS. Route 53 has no field for one; by the
 time TLS happens its work is finished. ACM certificates cannot be used here at
@@ -47,8 +46,9 @@ for that long.
 
 ## 2. Router
 
-Forward **80 and 443** to `192.168.89.106`. Port 8088 must **not** be forwarded —
-it is reachable from the LAN only, and NPM is what the internet talks to.
+Forward **80 and 443** to `192.168.89.106` — the same forwards the rest of this
+repo already relies on, so there is likely nothing to change. NPM is the only
+thing the internet talks to.
 
 ## 3. Certificate
 
@@ -100,30 +100,31 @@ not a failed issuance: certificates and hosts are separate objects.
 
 ## 4. The redirect
 
-Two equivalent options — pick one, not both.
+**NPM → Hosts → Redirection Hosts → Add** (this is what is deployed):
 
-**NPM Redirection Host** (no code): Hosts → Redirection Hosts → Add, domains
-`300zx.org` and `www.300zx.org`, forward domain `shakersoftwareworks.com`,
-Preserve Path on, HTTP code 302, then the certificate + Force SSL on the SSL tab.
+| Field | Value |
+|---|---|
+| Domain Names | `300zx.org`, `www.300zx.org` |
+| Scheme | `auto` |
+| Forward Domain | `shakersoftwareworks.com` |
+| Preserve Path | on |
+| HTTP Code | 302 |
+| SSL tab | the Let's Encrypt certificate above + Force SSL |
 
-**This repo's container**, if you'd rather the rule live in version control —
-[`sites/300zx-redirect.conf`](../sites/300zx-redirect.conf), wired up in
-`docker-compose.yml` as `redirect-300zx`. On Unraid without compose:
-
-```bash
-docker run -d --name 300zx-redirect --restart unless-stopped \
-  -p 8088:80 \
-  -v /mnt/user/appdata/300zx-redirect/default.conf:/etc/nginx/conf.d/default.conf:ro \
-  nginx:alpine
-```
-
-Then an ordinary NPM **proxy host**: `300zx.org` + `www.300zx.org` →
-`http://192.168.89.106:8088`, certificate + Force SSL.
+A redirection host replaces a proxy host — there is no proxy host for
+`300zx.org`, and no container behind it. Nothing is served from this box for
+this domain.
 
 **Use 302, not 301, until the redirect is certainly permanent.** Browsers cache a
 301 indefinitely; anyone who visits during a premature 301 keeps getting bounced
 forever, without a request ever reaching the server again, and there is no way to
-recall it.
+recall it. Changing the HTTP Code field later is a one-click switch once you are
+sure.
+
+The certificate is still required even though nothing is served. The TLS
+handshake completes *before* a redirect can be sent, so `https://300zx.org`
+presents the certificate first and only then answers 302. Without it, visitors
+get a browser warning instead of a redirect.
 
 ## 5. Don't gate this one with the portal
 
@@ -139,11 +140,6 @@ redirect back to a host the cookie never reaches: an endless loop. Leave
 Work outward — each step only makes sense if the previous one passed.
 
 ```bash
-# the redirector itself, from the Unraid box
-curl -sI http://192.168.89.106:8088 | head -2
-#   HTTP/1.1 302 Moved Temporarily
-#   Location: https://shakersoftwareworks.com/
-
 # DNS matches the current WAN IP
 dig +short 300zx.org
 curl -s https://checkip.amazonaws.com
@@ -159,5 +155,5 @@ curl -sIL https://300zx.org | grep -E "^HTTP|^[Ll]ocation"
 |---|---|
 | Hangs from the LAN, works from cell data | No hairpin NAT on the router — same caveat as the rest of this repo |
 | Certificate warning naming the wrong domain | The host isn't using the certificate you think; re-check the SSL tab selection saved |
-| 502 from NPM | The redirect container is down, or the upstream is set to a hostname that resolves to the WAN IP instead of `192.168.89.106` |
-| Redirect goes to the homepage, losing the path | `$request_uri` dropped from the `return`, or Preserve Path off |
+| Redirect goes to the homepage, losing the path | Preserve Path is off on the redirection host |
+| Redirect works but the target 404s | Preserve Path is on and the path exists on 300zx.org's old structure but not the target's — turn it off |

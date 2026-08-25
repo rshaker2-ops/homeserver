@@ -39,8 +39,7 @@ flowchart LR
 | `docs/in-app-sso.md` | Same Google account *inside* the apps (FileBrowser/2FAuth header auth, Immich/Nextcloud OIDC) |
 | `docs/hearth-mobile-app-auth.md` | Hearth mobile app behind the portal (per-device `X-Portal-Token` flow) |
 | `unraid/portal-template.xml` | Unraid Docker template (Docker tab → Add Container) |
-| `sites/300zx-redirect.conf` | nginx config redirecting 300zx.org → shakersoftwareworks.com |
-| `docs/300zx-org-redirect.md` | Second domain end-to-end: Route 53 + dynamic IP, DNS-01 cert, redirect |
+| `docs/300zx-org-redirect.md` | 300zx.org → shakersoftwareworks.com: Route 53 + dynamic IP, DNS-01 cert, NPM redirection host |
 | `.github/workflows/portal.yml` | CI: tests on PRs, publishes `ghcr.io/rshaker2-ops/homeserver-portal` on `main` |
 
 ## Setup
