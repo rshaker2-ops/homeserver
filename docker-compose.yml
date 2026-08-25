@@ -18,5 +18,17 @@ services:
       # then replace the volume above with:
       # - /mnt/cache/appdata/portal:/data
 
+  # Serves 300zx.org, which redirects to shakersoftwareworks.com.
+  # NPM proxy host: 300zx.org + www.300zx.org -> http://192.168.89.106:8088
+  # See docs/300zx-org-redirect.md.
+  redirect-300zx:
+    image: nginx:alpine
+    container_name: 300zx-redirect
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    volumes:
+      - ./sites/300zx-redirect.conf:/etc/nginx/conf.d/default.conf:ro
+
 volumes:
   portal_data:
